@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Site settings — Admin{% endblock %}
+{% block content %}
+<style>
+  .set-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px;align-items:start;}
+  .set-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:0;box-shadow:var(--shadow);overflow:hidden;}
+  .set-card > .set-head{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);}
+  .set-card .ic{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent2);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto;font-size:17px;}
+  .set-card .set-head h2{margin:0;font-size:15px;font-weight:600;}
+  .set-card .set-head .desc{color:var(--muted);font-size:12px;margin-top:1px;}
+  .set-body{padding:18px 20px;display:flex;flex-direction:column;gap:14px;}
+  .set-field label{display:block;font-size:13px;font-weight:500;margin-bottom:6px;color:var(--ink);}
+  .set-field .hint{margin-top:5px;}
+  .set-check{display:flex;align-items:flex-start;gap:10px;}
+  .set-check label{margin-bottom:0;}
+  .set-check input[type=checkbox]{margin-top:2px;}
+  .set-actions{position:sticky;bottom:0;margin-top:22px;padding:16px 0;
+    display:flex;gap:12px;align-items:center;}
+  .set-span-full{grid-column:1/-1;}
+</style>
+
+<div class="page-head"><h1>Site settings</h1>
+  <div class="sub"><a href="{% url 'core:console_home' %}">&larr; Admin console</a></div></div>
+
+{% if form.non_field_errors %}<div class="flash error">{{ form.non_field_errors }}</div>{% endif %}
+
+<form method="post">
+  {% csrf_token %}
+  <div class="set-grid">
+
+    <section class="set-card">
+      <div class="set-head"><span class="ic">⚙️</span>
+        <div><h2>General</h2><div class="desc">Branding, locale &amp; display</div></div></div>
+      <div class="set-body">
+        {% include "core/console/_settings_field.html" with field=form.site_name %}
+        {% include "core/console/_settings_field.html" with field=form.timezone %}
+        {% include "core/console/_settings_field.html" with field=form.date_format %}
+        {% include "core/console/_settings_field.html" with field=form.pagination_size %}
+      </div>
+    </section>
+
+    <section class="set-card">
+      <div class="set-head"><span class="ic">🔐</span>
+        <div><h2>Sessions &amp; Quota</h2><div class="desc">Access limits &amp; storage</div></div></div>
+      <div class="set-body">
+        {% include "core/console/_settings_field.html" with field=form.session_idle_timeout_minutes %}
+        {% include "core/console/_settings_field.html" with field=form.default_user_quota_gb %}
+      </div>
+    </section>
+
+    <section class="set-card">
+      <div class="set-head"><span class="ic">🗑️</span>
+        <div><h2>Retention</h2><div class="desc">Automatic file cleanup</div></div></div>
+      <div class="set-body">
+        {% include "core/console/_settings_field.html" with field=form.retention_enabled %}
+        {% include "core/console/_settings_field.html" with field=form.retention_days %}
+      </div>
+    </section>
+
+    <section class="set-card set-span-full">
+      <div class="set-head"><span class="ic">✉️</span>
+        <div><h2>Email &amp; SMTP</h2><div class="desc">Outbound mail &amp; notifications</div></div></div>
+      <div class="set-body">
+        <div class="set-grid" style="gap:14px;">
+          {% include "core/console/_settings_field.html" with field=form.smtp_enabled %}
+          {% include "core/console/_settings_field.html" with field=form.smtp_host %}
+          {% include "core/console/_settings_field.html" with field=form.smtp_port %}
+          {% include "core/console/_settings_field.html" with field=form.smtp_username %}
+          {% include "core/console/_settings_field.html" with field=form.smtp_password %}
+          {% include "core/console/_settings_field.html" with field=form.default_from_email %}
+          {% include "core/console/_settings_field.html" with field=form.notification_bcc %}
+          {% include "core/console/_settings_field.html" with field=form.expiry_reminder_days %}
+          {% include "core/console/_settings_field.html" with field=form.smtp_use_tls %}
+          {% include "core/console/_settings_field.html" with field=form.smtp_use_ssl %}
+          {% include "core/console/_settings_field.html" with field=form.send_welcome_email %}
+          {% include "core/console/_settings_field.html" with field=form.send_assignment_email %}
+        </div>
+      </div>
+    </section>
+
+    <section class="set-card set-span-full">
+      <div class="set-head"><span class="ic">🗂️</span>
+        <div><h2>LDAP / Directory</h2><div class="desc">Directory authentication &amp; attribute mapping</div></div></div>
+      <div class="set-body">
+        <div class="set-grid" style="gap:14px;">
+          {% include "core/console/_settings_field.html" with field=form.ldap_enabled %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_server_uri %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_use_ssl %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_connect_timeout %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_bind_dn %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_bind_password %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_base_dn %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_user_search_filter %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_attr_email %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_attr_employee_id %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_attr_first_name %}
+          {% include "core/console/_settings_field.html" with field=form.ldap_attr_last_name %}
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="set-actions">
+    <button type="submit">Save settings</button>
+  </div>
+</form>
+{% endblock %}

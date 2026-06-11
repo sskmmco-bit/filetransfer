@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% load file_extras %}
+{% block title %}All files — Admin{% endblock %}
+{% block content %}
+<div class="page-head"><h1>All files</h1>
+  <div class="sub"><a href="{% url 'core:console_home' %}">&larr; Admin console</a></div></div>
+
+<div class="toolbar">
+  <form method="get" style="display:flex;gap:8px;">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search files / owners…">
+    <select name="status" onchange="this.form.submit()">
+      <option value="">All statuses</option>
+      {% for val, label in statuses %}
+        <option value="{{ val }}" {% if status == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn-sm" type="submit">Filter</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="flist">
+    <div class="flist-head" style="grid-template-columns:1fr 150px 120px 90px 140px 90px;">
+      <span>Name</span><span>Owner</span><span>Status</span>
+      <span class="h-size">Size</span><span class="h-date">Uploaded</span>
+      <span style="text-align:right;">Actions</span>
+    </div>
+    {% for f in page %}
+    <div class="frow" style="grid-template-columns:1fr 150px 120px 90px 140px 90px;">
+      <div class="fmain">
+        <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
+        <div class="fmeta">
+          <a class="fname" href="{% url 'files:detail' uuid=f.uuid %}">{{ f.display_name }}</a>
+        </div>
+      </div>
+      <div class="fsize" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ f.owner }}</div>
+      <div>
+        {% if f.status == 'active' %}<span class="fbadge pub">● Active</span>
+        {% elif f.status == 'deleted' %}<span class="fbadge priv">● Deleted</span>
+        {% else %}<span class="fbadge team" style="background:var(--amber-bg);color:#b4730a;">● {{ f.get_status_display }}</span>{% endif %}
+      </div>
+      <div class="fsize">{{ f.size|filesizeformat }}</div>
+      <div class="fdate">{{ f.uploaded_at|date:"M j, H:i"|default:"—" }}</div>
+      <div class="factions">
+        <a class="iaction" href="{% url 'files:detail' uuid=f.uuid %}" title="View">
+          <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
+        {% if f.status != "deleted" %}
+        <button type="button" class="iaction danger js-fdel" data-url="{% url 'core:manage_file_delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
+        {% endif %}
+      </div>
+    </div>
+    {% empty %}
+    <div class="fempty"><div class="big">🗂️</div><p>No files match.</p></div>
+    {% endfor %}
+  </div>
+</div>
+{% include "core/console/_pager.html" %}
+
+<form id="fdelForm" method="post" style="display:none;">{% csrf_token %}</form>
+<script>
+(function(){
+  document.querySelectorAll('.js-fdel').forEach(function(b){
+    b.addEventListener('click',function(){
+      if(confirm('Soft-delete "'+b.dataset.name+'"? The stored object is removed; the record is kept.')){
+        var f=document.getElementById('fdelForm'); f.action=b.dataset.url; f.submit();
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

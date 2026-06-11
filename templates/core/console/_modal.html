@@ -1,0 +1,59 @@
+{% comment %}
+Reusable AJAX modal for console CRUD. Any link with data-modal opens its href
+(fetched with X-Requested-With) inside the modal; forms with data-cform submit
+via fetch — JSON {ok,redirect} navigates, a 422 fragment re-renders with errors.
+{% endcomment %}
+<div id="cmodal" class="cmodal" hidden>
+  <div class="cmodal-card">
+    <button type="button" class="cmodal-x" data-modal-close aria-label="Close">&times;</button>
+    <div id="cmodal-body"></div>
+  </div>
+</div>
+<script>
+(function(){
+  const modal = document.getElementById('cmodal');
+  const body = document.getElementById('cmodal-body');
+  const open = () => { modal.hidden = false; };
+  const close = () => { modal.hidden = true; body.innerHTML = ''; };
+
+  async function load(url){
+    body.innerHTML = '<div class="cmodal-busy">Loading…</div>';
+    open();
+    const r = await fetch(url, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+    body.innerHTML = await r.text();
+  }
+
+  async function submit(form){
+    const r = await fetch(form.action, {
+      method: 'POST',
+      headers: {'X-Requested-With': 'XMLHttpRequest'},
+      body: new FormData(form),
+    });
+    const ct = r.headers.get('content-type') || '';
+    if (r.ok && ct.includes('application/json')){
+      const d = await r.json();
+      window.location = d.redirect || window.location.href;
+      return;
+    }
+    // 422 (validation errors) or other — re-render the returned fragment.
+    body.innerHTML = await r.text();
+  }
+
+  document.addEventListener('click', (e) => {
+    const trigger = e.target.closest('[data-modal]');
+    if (trigger){ e.preventDefault(); load(trigger.getAttribute('href')); return; }
+    if (e.target.closest('[data-modal-close]') || e.target.closest('[data-cancel]')){
+      e.preventDefault(); close(); return;
+    }
+    if (e.target === modal){ close(); }
+  });
+
+  // Delegate form submits inside the modal.
+  body.addEventListener('submit', (e) => {
+    const form = e.target.closest('form[data-cform]');
+    if (form){ e.preventDefault(); submit(form); }
+  });
+
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) close(); });
+})();
+</script>

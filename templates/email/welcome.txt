@@ -1,0 +1,8 @@
+Subject: Welcome to MMFileTransfer
+
+Hello {{ user.get_full_name|default:user.username }},
+
+An account has been created for you on MMFileTransfer. You can now log in using
+your employee ID, email address, or username.
+
+If you have any questions, please contact your administrator.

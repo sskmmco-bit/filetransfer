@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Activity log — MMFileTransfer{% endblock %}
+{% block content %}
+<h1>Activity log</h1>
+<p><a href="{% url 'core:console_home' %}">&larr; Console</a></p>
+<div class="card">
+  <table style="width:100%; border-collapse:collapse;">
+    <thead><tr style="text-align:left; border-bottom:2px solid #e2e8f0;">
+      <th style="padding:8px;">When</th><th style="padding:8px;">Actor</th>
+      <th style="padding:8px;">Action</th><th style="padding:8px;">IP</th><th style="padding:8px;">Message</th>
+    </tr></thead>
+    <tbody>
+      {% for e in page %}
+      <tr style="border-bottom:1px solid #eef2f7;">
+        <td style="padding:8px;">{{ e.created_at|date:"Y-m-d H:i:s" }}</td>
+        <td style="padding:8px;">{{ e.actor|default:"—" }}</td>
+        <td style="padding:8px;">{{ e.get_action_display }}</td>
+        <td style="padding:8px;">{{ e.ip_address|default:"—" }}</td>
+        <td style="padding:8px;">{{ e.message }}</td>
+      </tr>
+      {% empty %}<tr><td colspan="5" style="padding:8px; color:#5d6d7e;">No entries.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% include "core/console/_pager.html" %}
+{% endblock %}

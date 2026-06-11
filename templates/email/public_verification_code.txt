@@ -1,0 +1,7 @@
+Subject: Your MMFileTransfer download verification code
+
+You requested to download "{{ file_name }}".
+
+Your verification code is: {{ code }}
+
+This code expires in 15 minutes. If you did not request this, you can ignore this email.

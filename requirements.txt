@@ -1,0 +1,27 @@
+# MMFileTransfer — Phase 0 / Phase 1 starter dependencies
+# Pin to known-good versions; bump deliberately.
+
+Django==5.1.4
+psycopg[binary]==3.2.3          # PostgreSQL driver (psycopg 3)
+django-environ==0.11.2          # 12-factor env config
+
+# Async / queue
+celery==5.4.0
+redis==5.2.1
+django-redis==5.4.0             # Redis cache backend
+
+# Object storage (MinIO via S3 API)
+django-storages==1.14.4
+boto3==1.35.80
+
+# Auth / security (Phase 1)
+ldap3==2.9.1                    # LDAP bind + JIT provisioning (§5.7.3)
+cryptography==44.0.0            # Fernet encryption for secrets at rest (§5.11)
+
+# Web serving / static
+gunicorn==23.0.0
+whitenoise==6.8.2
+
+# Files (used from Phase 2 onward — installed now so the image is ready)
+Pillow==11.0.0                  # thumbnails / image preview
+python-magic==0.4.27            # magic-byte content sniffing (needs libmagic1)

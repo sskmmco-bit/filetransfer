@@ -1,0 +1,107 @@
+# MMFileTransfer — development stack.
+# Usage:  cp .env.example .env  &&  docker compose up --build
+# Web runs Django's autoreloading runserver; code is bind-mounted.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mmftp}
+      POSTGRES_USER: ${POSTGRES_USER:-mmftp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mmftp}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mmftp} -d ${POSTGRES_DB:-mmftp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+
+  # One-shot: create the files bucket on first boot.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${MINIO_BUCKET:-mmftp-files} &&
+      echo 'bucket ready: ${MINIO_BUCKET:-mmftp-files}'
+      "
+    restart: "no"
+
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    env_file: .env
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: .
+    entrypoint: /app/docker/entrypoint.celery.sh
+    command: celery -A mmftp worker -l info
+    env_file: .env
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: .
+    entrypoint: /app/docker/entrypoint.celery.sh
+    command: celery -A mmftp beat -l info
+    env_file: .env
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  minio_data:

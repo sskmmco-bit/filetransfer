@@ -1,0 +1,7 @@
+<h2 style="margin-top:0;font-size:18px;">Delete {{ resource.label }}</h2>
+<p>Are you sure you want to delete <strong>{{ object }}</strong>? This cannot be undone.</p>
+<form method="post" action="{% url 'core:manage_delete' key=resource.key pk=object.pk %}" data-cform>
+  {% csrf_token %}
+  <button type="submit" class="btn-danger" style="padding:10px 18px;border-radius:9px;font-weight:600;cursor:pointer;">Yes, delete</button>
+  <a data-cancel href="{% url 'core:manage_list' key=resource.key %}" class="btn btn-ghost btn-sm" style="margin-left:8px;">Cancel</a>
+</form>

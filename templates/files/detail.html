@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% load file_extras %}
+{% block title %}{{ file.display_name }} — MMFileTransfer{% endblock %}
+{% block content %}
+
+<style>
+  .fd-top{display:flex;align-items:center;gap:14px;margin-bottom:18px;}
+  .fd-top .fic{width:48px;height:48px;border-radius:12px;font-size:12px;}
+  .fd-top h1{margin:0;font-size:22px;line-height:1.2;word-break:break-word;}
+  .fd-top .sub{color:var(--muted);font-size:13px;margin-top:3px;}
+  .fd-grid{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;}
+  .fd-card{background:#fff;border:1px solid var(--line);border-radius:18px;
+    box-shadow:0 1px 3px rgba(16,24,40,.05),0 12px 24px rgba(16,24,40,.05);}
+  .fd-card .pad{padding:20px 22px;}
+  .fd-card h3{margin:0 0 14px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+  .fd-preview{position:sticky;top:24px;overflow:hidden;}
+  .fd-preview .ph{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);}
+  .fd-preview .ph b{font-size:14px;}
+  .fd-preview .body{padding:18px;background:#fafbff;display:flex;align-items:center;justify-content:center;min-height:280px;}
+  .fd-preview img,.fd-preview video{max-width:100%;max-height:70vh;border-radius:10px;display:block;}
+  .fd-preview iframe{width:100%;height:70vh;border:1px solid var(--line);border-radius:10px;background:#fff;}
+  .fd-noprev{color:var(--muted);text-align:center;padding:50px 20px;}
+  .fd-noprev .big{font-size:46px;margin-bottom:10px;}
+  .fd-info{display:grid;grid-template-columns:1fr 1fr;gap:16px 18px;}
+  .fd-info.full{grid-template-columns:1fr;}
+  .fd-k{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);}
+  .fd-v{font-size:14px;font-weight:500;color:var(--ink);margin-top:2px;word-break:break-word;}
+  .fd-v.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:400;color:#475569;}
+  .fd-badge{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:5px 12px;border-radius:999px;border:1px solid transparent;}
+  .fd-badge.ok{background:var(--green-bg);color:#0f7a52;border-color:#bce8d4;}
+  .fd-badge.warn{background:var(--amber-bg);color:#b4730a;border-color:#f6dca4;}
+  .fd-badge.dim{background:#eef1f7;color:#64748b;border-color:#e2e7f0;}
+  .fd-actions{display:flex;flex-direction:column;gap:10px;}
+  .fd-btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 14px;border-radius:11px;
+    font-weight:600;font-size:14px;cursor:pointer;border:1px solid transparent;width:100%;text-align:center;}
+  .fd-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+  .fd-btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;}
+  .fd-btn.secondary{background:#fff;color:var(--accent2);border-color:var(--line);}
+  .fd-btn.secondary:hover{background:#f5f6ff;}
+  .fd-danger{margin-top:8px;border-top:1px dashed var(--line);padding-top:14px;}
+  .fd-danger .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--red);font-weight:700;margin-bottom:6px;}
+  .fd-del{background:transparent;border:0;color:var(--red);font-weight:600;cursor:pointer;font-size:14px;padding:6px 0;}
+  .fd-del:hover{text-decoration:underline;}
+  .fd-urlrow{display:flex;gap:8px;margin-top:8px;}
+  .fd-urlrow input{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:12px;background:#f7f8fd;color:#475569;}
+  .fd-mini{padding:9px 12px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--accent2);cursor:pointer;white-space:nowrap;}
+  .fd-mini:hover{background:#f5f6ff;}
+  .fd-check{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0;}
+  .fd-check input{width:auto;}
+  .fd-back{display:inline-flex;align-items:center;gap:6px;color:var(--muted);margin-bottom:14px;font-size:13px;}
+  @media (max-width:900px){ .fd-grid{grid-template-columns:1fr;} .fd-preview{position:static;} }
+</style>
+
+<a class="fd-back" href="{% url 'files:my_uploads' %}">← Back to My Files</a>
+
+<div class="fd-top">
+  <div class="fic {{ file.original_filename|ftype }}">{{ file.original_filename|fext }}</div>
+  <div>
+    <h1>{{ file.display_name }}</h1>
+    <div class="sub">{{ file.original_filename|fext }} · {{ file.size|filesizeformat }}{% if file.content_type %} · {{ file.content_type }}{% endif %}</div>
+  </div>
+</div>
+
+<div class="fd-grid">
+  <!-- LEFT: large sticky preview -->
+  <div class="fd-card fd-preview">
+    <div class="ph">
+      <b>Preview</b>
+      {% if file.is_active and preview_kind != "none" %}
+        <a href="{% url 'files:preview' uuid=file.uuid %}" target="_blank" rel="noopener">Open in new tab ↗</a>
+      {% endif %}
+    </div>
+    <div class="body">
+      {% if not file.is_active %}
+        <div class="fd-noprev"><div class="big">⏳</div><p>This file isn't active yet ({{ file.get_status_display }}). No preview available.</p></div>
+      {% elif preview_kind == "image" %}
+        <img src="{{ preview_url }}" alt="{{ file.display_name }}">
+      {% elif preview_kind == "pdf" %}
+        <iframe src="{{ preview_url }}"></iframe>
+      {% elif preview_kind == "video" %}
+        <video src="{{ preview_url }}" controls></video>
+      {% elif preview_kind == "audio" %}
+        <audio src="{{ preview_url }}" controls style="width:100%;"></audio>
+      {% elif preview_kind == "text" %}
+        <iframe src="{{ preview_url }}"></iframe>
+      {% else %}
+        <div class="fd-noprev"><div class="big">📄</div><p>No inline preview for this file type.<br>Use Download to get the file.</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- RIGHT: info + actions + sharing + danger -->
+  <div style="display:flex;flex-direction:column;gap:20px;">
+    <div class="fd-card"><div class="pad">
+      <h3>File information</h3>
+      <div style="margin-bottom:16px;">
+        {% if file.status == 'active' %}<span class="fd-badge ok">● Active</span>
+        {% elif file.status == 'deleted' %}<span class="fd-badge dim">● Deleted</span>
+        {% else %}<span class="fd-badge warn">● {{ file.get_status_display }}</span>{% endif %}
+      </div>
+      <div class="fd-info">
+        <div><div class="fd-k">Size</div><div class="fd-v">{{ file.size|filesizeformat }}</div></div>
+        <div><div class="fd-k">Type</div><div class="fd-v">{{ file.content_type|default:"—" }}</div></div>
+        <div><div class="fd-k">Uploaded</div><div class="fd-v">{{ file.uploaded_at|date:"j M Y, H:i"|default:"—" }}</div></div>
+        <div><div class="fd-k">Downloads</div><div class="fd-v">{{ file.download_count }}{% if file.download_limit %} / {{ file.download_limit }}{% endif %}</div></div>
+        {% if file.expiry_date %}<div><div class="fd-k">Expires</div><div class="fd-v">{{ file.expiry_date|date:"j M Y" }}</div></div>{% endif %}
+      </div>
+      {% if file.description %}
+      <div style="margin-top:16px;"><div class="fd-k">Description</div><div class="fd-v" style="font-weight:400;">{{ file.description }}</div></div>
+      {% endif %}
+      {% for key, value in file.custom_fields.items %}
+      <div style="margin-top:14px;"><div class="fd-k">{{ key }}</div><div class="fd-v" style="font-weight:400;">{{ value }}</div></div>
+      {% endfor %}
+      <div style="margin-top:16px;"><div class="fd-k">SHA-256</div><div class="fd-v mono">{{ file.sha256|default:"—" }}</div></div>
+    </div></div>
+
+    {% if file.is_active %}
+    <div class="fd-card"><div class="pad">
+      <h3>Actions</h3>
+      <div class="fd-actions">
+        <a class="fd-btn primary" href="{% url 'files:download' uuid=file.uuid %}">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg> Download
+        </a>
+        {% if is_owner %}
+        <a class="fd-btn secondary" href="#fd-share">
+          <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg> Share
+        </a>
+        {% endif %}
+      </div>
+      {% if is_owner %}
+      <div class="fd-danger">
+        <div class="lbl">Danger zone</div>
+        <form method="post" action="{% url 'files:delete' uuid=file.uuid %}"
+              onsubmit="return confirm('Delete “{{ file.display_name|escapejs }}”? The stored file is removed; the record is kept for audit.');">
+          {% csrf_token %}
+          <button type="submit" class="fd-del">Delete this file</button>
+        </form>
+      </div>
+      {% endif %}
+    </div></div>
+    {% endif %}
+
+    {% if is_owner and file.is_active %}
+    <div class="fd-card" id="fd-share"><div class="pad">
+      <h3>Share file</h3>
+      {% if file.is_public and file.public_token %}
+        {% url 'public:landing' token=file.public_token as public_url %}
+        <p class="hint" style="margin:0 0 4px;">Anyone with this link can download{% if file.public_require_email_verify %} (after email verification){% endif %}.</p>
+        <div class="fd-urlrow">
+          <input type="text" id="fdPublicUrl" readonly value="{{ request.scheme }}://{{ request.get_host }}{{ public_url }}">
+          <button type="button" class="fd-mini" id="fdCopy">Copy</button>
+          <a class="fd-mini" href="{{ public_url }}" target="_blank" rel="noopener">Open</a>
+        </div>
+        <form method="post" action="{% url 'files:manage_public_link' uuid=file.uuid %}" style="margin-top:14px;">
+          {% csrf_token %}
+          <label class="fd-check"><input type="checkbox" name="require_verify" {% if file.public_require_email_verify %}checked{% endif %}> Require email verification</label>
+          <div style="display:flex;gap:8px;">
+            <button type="submit" name="action" value="rotate" class="fd-mini">↻ Rotate link</button>
+            <button type="submit" name="action" value="disable" class="fd-mini" style="color:var(--red);border-color:#f3c9c4;">Disable link</button>
+          </div>
+        </form>
+      {% else %}
+        <p class="hint" style="margin:0 0 8px;">Create a public link anyone can use to download — no account needed.</p>
+        <form method="post" action="{% url 'files:manage_public_link' uuid=file.uuid %}">
+          {% csrf_token %}
+          <label class="fd-check" style="margin-top:0;"><input type="checkbox" name="require_verify"> Require email verification</label>
+          <button type="submit" name="action" value="enable" class="fd-btn primary" style="margin-top:6px;">Create public link</button>
+        </form>
+      {% endif %}
+    </div></div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function(){
+  var btn=document.getElementById('fdCopy');
+  if(btn) btn.addEventListener('click',function(){
+    var i=document.getElementById('fdPublicUrl'); i.select();
+    navigator.clipboard.writeText(i.value).then(function(){
+      var t=btn.textContent; btn.textContent='Copied ✓';
+      setTimeout(function(){btn.textContent=t;},1500);
+    }).catch(function(){ document.execCommand('copy'); });
+  });
+})();
+</script>
+{% endblock %}

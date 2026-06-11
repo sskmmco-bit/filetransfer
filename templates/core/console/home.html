@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Admin console — MMFileTransfer{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Admin console</h1>
+  <div class="sub">Manage users, access, content, and review activity — all in-app.</div></div>
+
+<style>
+  .sw-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px;
+    box-shadow:0 1px 3px rgba(16,24,40,.05),0 12px 24px rgba(16,24,40,.05);display:flex;flex-direction:column;}
+  .sw-h{font-size:17px;font-weight:700;margin:0 0 4px;}
+  .sw-sub{color:var(--muted);font-size:13px;margin-bottom:16px;}
+  .sw-bar{height:12px;border-radius:999px;background:#eef1f7;display:flex;overflow:hidden;}
+  .sw-bar i{height:100%;display:block;}
+  .sw-legend{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 18px;margin-top:16px;}
+  .sw-leg{font-size:13px;}
+  .sw-leg .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;}
+  .sw-leg .k{color:var(--muted);text-transform:uppercase;font-size:11px;letter-spacing:.03em;}
+  .sw-leg .v{font-weight:700;font-size:16px;margin-top:2px;}
+  .sw-cons{display:flex;align-items:center;gap:14px;padding:13px 0;border-bottom:1px solid #f1f3f9;}
+  .sw-cons:last-child{border-bottom:0;}
+  .sw-av{width:40px;height:40px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--accent-soft);color:var(--accent2);font-weight:700;font-size:13px;}
+  .sw-cons .nm{font-weight:600;}
+  .sw-cons .meta{color:var(--muted);font-size:12px;}
+  .sw-cons .right{margin-left:auto;text-align:right;min-width:130px;}
+  .sw-cons .amt{font-weight:700;}
+  .sw-cons .track{height:6px;border-radius:999px;background:#eef1f7;margin-top:5px;overflow:hidden;}
+  .sw-cons .track i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:999px;}
+  .sw-viewall{margin-top:auto;padding-top:14px;text-align:center;}
+  .sw-viewall a{font-weight:600;}
+
+  /* modern action cards (replaces 80s link lists) */
+  .acards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
+  .acard{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--line);
+    border-radius:13px;background:#fff;transition:.14s;color:var(--ink);}
+  .acard:hover{border-color:var(--accent);box-shadow:0 6px 18px rgba(99,102,241,.12);transform:translateY(-1px);}
+  .acard .ic{width:38px;height:38px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--accent-soft);color:var(--accent2);}
+  .acard .ic svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  .acard .nm{font-weight:600;font-size:14px;}
+  .acard .ds{color:var(--muted);font-size:12px;margin-top:1px;}
+</style>
+
+<!-- Stat cards -->
+<div class="stat-grid">
+  <div class="stat"><div class="top"><div class="ic">
+    <svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h18"/></svg></div></div>
+    <div class="val">{{ storage.total_human }}</div><div class="lab">Storage used</div>
+    <div class="sub">{{ storage.total_files }} active files</div></div>
+  <div class="stat"><div class="top"><div class="ic">
+    <svg viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg></div></div>
+    <div class="val">{{ stats.activity }}</div><div class="lab">Activity entries</div>
+    <div class="sub">audit trail</div></div>
+  <div class="stat"><div class="top"><div class="ic">
+    <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg></div></div>
+    <div class="val">{{ stats.logins }}</div><div class="lab">Login attempts</div>
+    <div class="sub">{{ stats.failed_logins }} failed</div></div>
+  <div class="stat"><div class="top"><div class="ic">
+    <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></div></div>
+    <div class="val">{{ stats.downloads }}</div><div class="lab">Downloads</div>
+    <div class="sub">all time</div></div>
+</div>
+
+<!-- Storage row -->
+<div class="cols" style="grid-template-columns:1fr 1fr;margin-bottom:20px;">
+  <div class="sw-card">
+    <div class="sw-h">Storage breakdown</div>
+    <div class="sw-sub">{{ storage.total_human }} across all active files</div>
+    {% if storage.breakdown %}
+    <div class="sw-bar">
+      {% for b in storage.breakdown %}<i style="width:{{ b.pct }}%;background:{{ b.color }};" title="{{ b.label }} · {{ b.human }}"></i>{% endfor %}
+    </div>
+    <div class="sw-legend">
+      {% for b in storage.breakdown %}
+      <div class="sw-leg">
+        <div class="k"><span class="dot" style="background:{{ b.color }};"></span>{{ b.label }}</div>
+        <div class="v">{{ b.human }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p class="hint">No files stored yet.</p>{% endif %}
+  </div>
+
+  <div class="sw-card">
+    <div class="sw-h">Top storage consumers</div>
+    <div class="sw-sub">Users using the most space</div>
+    {% for c in storage.top_consumers %}
+    <div class="sw-cons">
+      <div class="sw-av">{{ c.initials }}</div>
+      <div>
+        <div class="nm">{{ c.name }}</div>
+        <div class="meta">{{ c.role }} · {{ c.nfiles }} file{{ c.nfiles|pluralize }}</div>
+      </div>
+      <div class="right">
+        <div class="amt">{{ c.human }}</div>
+        <div class="track"><i style="width:{{ c.bar_pct }}%;"></i></div>
+      </div>
+    </div>
+    {% empty %}<p class="hint">No storage in use yet.</p>{% endfor %}
+    <div class="sw-viewall"><a href="{% url 'core:manage_list' key='users' %}">View all users →</a></div>
+  </div>
+</div>
+
+<!-- Manage -->
+<h2 style="font-size:16px;margin:0 0 12px;">Manage</h2>
+<div class="acards" style="margin-bottom:24px;">
+  <a class="acard" href="{% url 'core:manage_list' key='users' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3.3 3-5.5 6-5.5s6 2.2 6 5.5"/><circle cx="18" cy="9" r="2.6"/><path d="M16.5 14.5c2.2.3 4 1.9 4 4.5"/></svg></div>
+    <div><div class="nm">Users</div><div class="ds">Accounts &amp; quotas</div></div></a>
+  <a class="acard" href="{% url 'core:manage_list' key='groups' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6"/></svg></div>
+    <div><div class="nm">Groups</div><div class="ds">Shared spaces</div></div></a>
+  {% if user.is_superadmin %}
+  <a class="acard" href="{% url 'core:manage_list' key='roles' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div>
+    <div><div class="nm">Roles</div><div class="ds">Permissions</div></div></a>
+  <a class="acard" href="{% url 'core:manage_settings' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 00-1.7-1L14.5 2h-4l-.4 2.6a7 7 0 00-1.7 1l-2.3-1-2 3.4L4 11a7 7 0 000 2l-2 1.5 2 3.4 2.3-1a7 7 0 001.7 1l.4 2.6h4l.4-2.6a7 7 0 001.7-1l2.3 1 2-3.4L19 13a7 7 0 00.1-1z"/></svg></div>
+    <div><div class="nm">Site settings</div><div class="ds">SMTP / LDAP / quota</div></div></a>
+  {% endif %}
+  <a class="acard" href="{% url 'core:manage_list' key='categories' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 7l2-3h6l2 3h6v12H3z"/></svg></div>
+    <div><div class="nm">Categories</div><div class="ds">File tags</div></div></a>
+  <a class="acard" href="{% url 'core:manage_list' key='custom-fields' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg></div>
+    <div><div class="nm">Custom fields</div><div class="ds">Metadata schema</div></div></a>
+  <a class="acard" href="{% url 'core:manage_files' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h7l2 2h7v10H4z"/></svg></div>
+    <div><div class="nm">All files</div><div class="ds">Every upload</div></div></a>
+</div>
+
+<!-- Audit & logs -->
+<h2 style="font-size:16px;margin:0 0 12px;">Audit &amp; logs</h2>
+<div class="acards">
+  <a class="acard" href="{% url 'core:console_activity' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 19V5m4 14V9m4 10V7m4 12v-6m4 6V11"/></svg></div>
+    <div><div class="nm">Activity log</div><div class="ds">{{ stats.activity }} entries</div></div></a>
+  <a class="acard" href="{% url 'core:console_logins' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg></div>
+    <div><div class="nm">Login attempts</div><div class="ds">{{ stats.failed_logins }} failed</div></div></a>
+  <a class="acard" href="{% url 'core:console_downloads' %}">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></div>
+    <div><div class="nm">Download events</div><div class="ds">{{ stats.downloads }} total</div></div></a>
+  <a class="acard" href="/admin/" target="_blank" rel="noopener">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M10 5H5a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-5"/></svg></div>
+    <div><div class="nm">Django admin ↗</div><div class="ds">Advanced</div></div></a>
+</div>
+{% endblock %}

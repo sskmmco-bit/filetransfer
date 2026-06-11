@@ -1,0 +1,15 @@
+Subject: A file has been shared with you on MMFileTransfer
+
+Hello {{ recipient.get_full_name|default:recipient.username }},
+
+{% if assigned_by %}{{ assigned_by.get_full_name|default:assigned_by.username }} has{% else %}You have been{% endif %} shared a file with you:
+
+  {{ file.display_name }} ({{ file.original_filename }})
+{% if file.message %}
+Message from the sender:
+  {{ file.message }}
+{% endif %}
+Log in to MMFileTransfer to view and download it.
+{% if file.expiry_date %}
+This file is available until {{ file.expiry_date }}.
+{% endif %}

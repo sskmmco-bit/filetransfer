@@ -1,0 +1,371 @@
+{% comment %}
+3-step upload wizard modal (Files → Details → Recipients). Opened by any element
+with [data-uw-open]. Uploads each file via the chunked endpoints with progress,
+then finalizes shared metadata + recipients in one call.
+{% endcomment %}
+<style>
+  .uw{position:fixed;inset:0;background:rgba(17,20,34,.55);display:flex;align-items:flex-start;
+    justify-content:center;padding:48px 16px;z-index:1100;overflow-y:auto;}
+  .uw[hidden]{display:none;}
+  .uw-card{background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(16,24,40,.3);
+    width:100%;max-width:640px;animation:cpop .12s ease-out;overflow:hidden;
+    display:flex;flex-direction:column;max-height:calc(100vh - 96px);}
+  .uw-head{display:flex;justify-content:space-between;align-items:flex-start;padding:20px 24px 14px;}
+  .uw-head h2{margin:0 0 10px;font-size:19px;}
+  .uw-x{background:#f1f3f9;border:0;border-radius:9px;width:32px;height:32px;font-size:18px;cursor:pointer;color:var(--muted);}
+  .uw-x:hover{background:#e7eaf3;color:var(--ink);}
+  .uw-steps{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);}
+  .uw-step{display:flex;align-items:center;gap:6px;}
+  .uw-step i{width:20px;height:20px;border-radius:50%;background:#e7eaf3;color:var(--muted);
+    display:flex;align-items:center;justify-content:center;font-style:normal;font-size:12px;font-weight:600;}
+  .uw-step.active{color:var(--accent2);font-weight:600;}
+  .uw-step.active i{background:var(--accent2);color:#fff;}
+  .uw-step.done i{background:var(--green);color:#fff;}
+  .uw-body{padding:8px 24px 20px;overflow-y:auto;flex:1;min-height:0;}
+  /* The drop zone stays put; only the growing file list scrolls. */
+  .uw-files{max-height:46vh;overflow-y:auto;margin:0 -6px;padding:0 6px;}
+  .uw-overall{margin-top:14px;}
+  .uw-overall .lbl{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:5px;}
+  .uw-overall .uw-bar{margin-top:0;}
+  .uw-overall .uw-bar i{background:linear-gradient(90deg,var(--accent),var(--accent2));}
+  .uw-err{color:#e0564a;font-size:13px;margin-top:10px;}
+  .uw-drop{border:2px dashed #cdd5e6;border-radius:14px;padding:30px;text-align:center;cursor:pointer;
+    background:#fafbff;transition:.15s;}
+  .uw-drop:hover,.uw-drop.over{border-color:var(--accent);background:#f2f3ff;}
+  .uw-drop-ic{width:52px;height:52px;border-radius:13px;background:#eef0ff;color:var(--accent2);
+    font-size:22px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;}
+  .uw-drop-t{font-weight:600;}
+  .uw-badges{margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
+  .uw-badges span{background:#eef1f7;color:var(--muted);border-radius:999px;padding:3px 10px;font-size:12px;}
+  .uw-frow{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px;}
+  .uw-frow .ic{width:34px;height:34px;border-radius:9px;background:#fdecec;color:#e0564a;display:flex;align-items:center;justify-content:center;font-size:13px;}
+  .uw-frow .meta{flex:1;min-width:0;}
+  .uw-frow .nm{font-weight:600;display:flex;justify-content:space-between;gap:10px;}
+  .uw-frow .sz{color:var(--muted);font-weight:400;font-size:12px;white-space:nowrap;}
+  .uw-bar{height:7px;background:#eef1f7;border-radius:999px;margin-top:7px;overflow:hidden;}
+  .uw-bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:999px;transition:width .15s;}
+  .uw-frow.done .uw-bar i{background:var(--green);}
+  .uw-frow .st{font-size:12px;color:var(--muted);margin-top:4px;}
+  .uw-frow .rm{background:transparent;border:0;color:#e0564a;cursor:pointer;font-size:16px;}
+  .uw-2col{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .uw-check{display:inline-flex;align-items:center;gap:7px;font-weight:500;margin-top:12px;}
+  .uw-check input{width:auto;}
+  .uw-recip-add{display:flex;gap:8px;}
+  .uw-chips{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;}
+  .uw-chip{background:#eef0ff;color:var(--accent2);border-radius:999px;padding:5px 10px;font-size:13px;display:inline-flex;align-items:center;gap:7px;}
+  .uw-chip b{background:transparent;border:0;color:var(--accent2);cursor:pointer;font-weight:700;}
+  .uw-public{border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:18px;background:#fafbff;}
+  .uw-foot{display:flex;align-items:center;gap:10px;padding:16px 24px;border-top:1px solid var(--line);}
+  .uw-foot .spacer{flex:1;}
+  .uw-done{font-size:20px;font-weight:700;color:var(--green);margin-bottom:8px;}
+  .uw-link{border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-top:10px;background:#fafbff;}
+  .uw-link .nm{font-size:13px;font-weight:600;margin-bottom:8px;}
+  .uw-link .urlrow{display:flex;gap:8px;}
+  .uw-link input{flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;background:#fff;color:#475569;}
+  .uw-link .mini{padding:8px 12px;border-radius:9px;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--accent2);cursor:pointer;white-space:nowrap;}
+  .uw-link .mini:hover{background:#f0f1ff;}
+</style>
+
+{% if can_upload %}
+<div id="uwModal" class="uw" hidden
+     data-init="{% url 'files:init_upload' %}"
+     data-chunk="{% url 'files:upload_chunk' %}"
+     data-complete="{% url 'files:upload_complete' %}"
+     data-finalize="{% url 'files:upload_finalize' %}"
+     data-myuploads="{% url 'files:my_uploads' %}"
+     data-csrf="{{ csrf_token }}">
+  <div class="uw-card">
+    <div class="uw-head">
+      <div>
+        <h2>Upload Files</h2>
+        <div class="uw-steps">
+          <span class="uw-step active" data-step="1"><i>1</i> Files</span>
+          <span class="uw-step" data-step="2"><i>2</i> Details</span>
+          <span class="uw-step" data-step="3"><i>3</i> Recipients</span>
+        </div>
+      </div>
+      <button type="button" class="uw-x" data-uw-close>&times;</button>
+    </div>
+
+    <div class="uw-body">
+      <section data-panel="1">
+        <div class="uw-drop" id="uwDrop">
+          <div class="uw-drop-ic">⬆</div>
+          <div class="uw-drop-t">Drop files here or click to browse</div>
+          <div class="hint">Any file type · chunked upload with resume support</div>
+          <div class="uw-badges"><span>SHA-256 verification</span><span>Resumable</span><span>Multi-file</span></div>
+          <input type="file" id="uwInput" multiple hidden>
+        </div>
+        <div class="uw-overall" id="uwOverall" hidden>
+          <div class="lbl"><span id="uwOverallTxt">Overall progress</span><span id="uwOverallPct">0%</span></div>
+          <div class="uw-bar"><i id="uwOverallBar"></i></div>
+        </div>
+        <div class="uw-files" id="uwFiles"></div>
+      </section>
+
+      <section data-panel="2" hidden>
+        <label>Description</label>
+        <textarea id="uwDesc" rows="3" placeholder="Describe what these files are..."></textarea>
+        <div class="uw-2col" style="margin-top:6px;">
+          <div><label>Category</label>
+            <select id="uwCat"><option value="">General</option>
+              {% for c in upload_categories %}<option value="{{ c.pk }}">{{ c.name }}</option>{% endfor %}
+            </select></div>
+          <div><label>Expiry</label>
+            <select id="uwExpirySel">
+              <option value="">Keep forever</option>
+              <option value="365">1 year</option>
+              <option value="60">60 days</option>
+              <option value="30">30 days</option>
+              <option value="7">7 days</option>
+              <option value="3">3 days</option>
+              <option value="1">1 day</option>
+              <option value="custom">Custom date…</option>
+            </select>
+            <input type="date" id="uwExpiry" hidden style="margin-top:8px;">
+            <div class="hint">Files are removed automatically after this.</div></div>
+        </div>
+        <label style="margin-top:12px;">Message to recipients (optional)</label>
+        <textarea id="uwMsg" rows="2" placeholder="Add a personal message..."></textarea>
+        <label class="uw-check"><input type="checkbox" id="uwNotify" checked> Notify recipients by email</label>
+      </section>
+
+      <section data-panel="3" hidden>
+        <label>Recipients <span class="hint">(select to add)</span></label>
+        <select id="uwUserSel">
+          <option value="">Select a user…</option>
+          {% for u in upload_users %}<option value="{{ u.username }}">{{ u.get_full_name|default:u.username }}{% if u.email %} ({{ u.email }}){% endif %}</option>{% endfor %}
+        </select>
+        {% if upload_groups %}
+        <label style="margin-top:12px;">Groups <span class="hint">(select to add all members)</span></label>
+        <select id="uwGroupSel">
+          <option value="">Select a group…</option>
+          {% for g in upload_groups %}<option value="{{ g.name }}">{{ g.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        <div class="uw-chips" id="uwChips"></div>
+        <div class="hint" style="margin-top:8px;">Pick at least one recipient/group, or enable a public link below — otherwise the file is only saved to your <b>My Files</b> and shared with no one.</div>
+        <div class="uw-public">
+          <label class="uw-check" style="margin-top:0;"><input type="checkbox" id="uwPublic"> Generate a public link</label>
+          <div id="uwPublicOpts" hidden style="margin-top:8px;">
+            <label class="uw-check" style="margin-top:0;"><input type="checkbox" id="uwVerify"> Email OTP verification</label>
+            <label class="uw-check" style="margin-left:18px;margin-top:0;">Download limit
+              <input type="number" id="uwLimit" min="1" placeholder="∞" style="width:80px;margin-left:6px;"></label>
+          </div>
+        </div>
+        <div class="uw-err" id="uwErr" hidden></div>
+      </section>
+
+      <section data-panel="done" hidden>
+        <div class="uw-done" id="uwDoneTitle">✓ Files sent</div>
+        <div class="hint" id="uwDoneMsg"></div>
+        <div id="uwDoneLinks" style="margin-top:14px;"></div>
+      </section>
+    </div>
+
+    <div class="uw-foot">
+      <div class="hint" id="uwStatus">No files selected</div>
+      <div class="spacer"></div>
+      <button type="button" class="btn btn-ghost" data-uw-close id="uwCancel">Cancel</button>
+      <button type="button" class="btn btn-ghost" id="uwBack" hidden>Back</button>
+      <button type="button" class="btn" id="uwNext" disabled>Next: Details</button>
+      <button type="button" class="btn" id="uwSend" hidden style="background:linear-gradient(135deg,#10b981,#059669);">Send Files ✓</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const m = document.getElementById('uwModal'); if(!m) return;
+  const U = {init:m.dataset.init, chunk:m.dataset.chunk, complete:m.dataset.complete,
+            finalize:m.dataset.finalize, mine:m.dataset.myuploads, csrf:m.dataset.csrf};
+  const $ = (id)=>document.getElementById(id);
+  const files = [];            // {file, uuid, status, sent}
+  const recipients = [];
+  let step = 1;
+
+  function open(preselectGroup){ reset(); m.hidden=false;
+    if(preselectGroup){ addRecip(preselectGroup, '👥 '+preselectGroup); } }
+  function close(){ m.hidden=true; }
+  function reset(){
+    files.length=0; recipients.length=0; step=1;
+    $('uwFiles').innerHTML=''; $('uwChips').innerHTML=''; $('uwInput').value='';
+    $('uwDesc').value=''; $('uwMsg').value=''; $('uwPublic').checked=false;
+    $('uwVerify').checked=false; $('uwLimit').value=''; $('uwPublicOpts').hidden=true;
+    $('uwDoneLinks').innerHTML=''; $('uwErr').hidden=true; $('uwOverall').hidden=true;
+    $('uwExpiry').value=''; $('uwExpiry').hidden=true; $('uwExpirySel').value='';
+    $('uwDoneTitle').textContent='✓ Files sent';
+    $('uwCat').value=''; $('uwNotify').checked=true; goStep(1);
+  }
+  function human(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB';
+    if(n<1073741824)return (n/1048576).toFixed(1)+' MB'; return (n/1073741824).toFixed(1)+' GB'; }
+
+  function goStep(n){
+    step=n;
+    m.querySelectorAll('[data-panel]').forEach(p=>p.hidden = p.dataset.panel != (n==='done'?'done':String(n)));
+    m.querySelectorAll('.uw-step').forEach(s=>{
+      const sn=+s.dataset.step; s.classList.toggle('active', sn===n);
+      s.classList.toggle('done', sn<n || n==='done');
+    });
+    $('uwBack').hidden = !(n===2||n===3);
+    $('uwNext').hidden = !(n===1||n===2);
+    $('uwSend').hidden = n!==3;
+    $('uwCancel').textContent = n==='done' ? 'Close' : 'Cancel';
+    if(n===1) $('uwNext').textContent='Next: Details';
+    if(n===2) $('uwNext').textContent='Next: Recipients';
+    if(n==='done'){ $('uwBack').hidden=true; }
+    refreshNext();
+  }
+  function refreshNext(){
+    const done = files.filter(f=>f.status==='done').length;
+    const busy = files.some(f=>f.status==='uploading');
+    if(step===1){ $('uwNext').disabled = done===0 || busy;
+      $('uwStatus').textContent = files.length ? `${files.length} file(s) · ${done} uploaded` : 'No files selected'; }
+    updateOverall();
+  }
+  // Aggregate progress across all selected files (only shown for multi-file).
+  function updateOverall(){
+    const o=$('uwOverall'); if(!o) return;
+    if(files.length<2){ o.hidden=true; return; }
+    o.hidden=false;
+    const total=files.reduce((s,f)=>s+f.file.size,0)||1;
+    const sent=files.reduce((s,f)=>s+(f.status==='done'?f.file.size:(f.sent||0)),0);
+    const done=files.filter(f=>f.status==='done').length;
+    const pct=Math.min(100,Math.round(sent/total*100));
+    $('uwOverallBar').style.width=pct+'%';
+    $('uwOverallPct').textContent=pct+'%';
+    $('uwOverallTxt').textContent=`${done}/${files.length} files · ${human(sent)} of ${human(total)}`;
+  }
+
+  // ---- file selection + upload ----
+  $('uwDrop').addEventListener('click', ()=>$('uwInput').click());
+  $('uwInput').addEventListener('change', e=>addFiles(e.target.files));
+  ['dragover','dragenter'].forEach(ev=>$('uwDrop').addEventListener(ev,e=>{e.preventDefault();$('uwDrop').classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>$('uwDrop').addEventListener(ev,e=>{e.preventDefault();$('uwDrop').classList.remove('over');}));
+  $('uwDrop').addEventListener('drop', e=>{ if(e.dataTransfer.files) addFiles(e.dataTransfer.files); });
+
+  function addFiles(list){ for(const f of list){ const rec={file:f,uuid:null,status:'pending',sent:0}; files.push(rec); renderRow(rec); uploadOne(rec); } refreshNext(); }
+
+  function renderRow(rec){
+    const row=document.createElement('div'); row.className='uw-frow'; rec.el=row;
+    row.innerHTML = `<div class="ic">${(rec.file.name.split('.').pop()||'?').slice(0,4).toUpperCase()}</div>
+      <div class="meta"><div class="nm"><span></span><span class="sz">${human(rec.file.size)}</span></div>
+      <div class="uw-bar"><i></i></div><div class="st">Starting…</div></div>
+      <button class="rm" title="Remove">🗑</button>`;
+    row.querySelector('.nm span').textContent = rec.file.name;
+    row.querySelector('.rm').addEventListener('click', ()=>{ const i=files.indexOf(rec); if(i>-1)files.splice(i,1); row.remove(); refreshNext(); });
+    $('uwFiles').appendChild(row);
+  }
+  function setProg(rec,pct,txt){ rec.el.querySelector('.uw-bar i').style.width=pct+'%'; rec.el.querySelector('.st').textContent=txt; updateOverall(); }
+
+  async function uploadOne(rec){
+    rec.status='uploading'; refreshNext();
+    try{
+      const initResp = await fetch(U.init,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
+        body:JSON.stringify({filename:rec.file.name,size:rec.file.size})});
+      const init = await initResp.json();
+      if(!initResp.ok || init.error){ rec.status='error'; setProg(rec,100,init.error||'Upload rejected'); refreshNext(); return; }
+      const part = init.part_size;
+      let off=0;
+      while(off < rec.file.size){
+        const blob = rec.file.slice(off, off+part);
+        const fd=new FormData(); fd.append('token',init.token); fd.append('chunk',blob);
+        await fetch(U.chunk,{method:'POST',headers:{'X-CSRFToken':U.csrf},body:fd});
+        off += part; rec.sent=Math.min(off,rec.file.size);
+        setProg(rec, Math.min(99,Math.round(rec.sent/rec.file.size*100)), Math.round(rec.sent/rec.file.size*100)+'%');
+      }
+      const fin = await (await fetch(U.complete,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
+        body:JSON.stringify({token:init.token})})).json();
+      if(fin.file_uuid){ rec.uuid=fin.file_uuid; rec.status='done'; rec.el.classList.add('done');
+        setProg(rec,100,'Complete'); }
+      else { rec.status='error'; setProg(rec,100,'Error: '+(fin.error||'upload failed')); }
+    }catch(err){ rec.status='error'; setProg(rec,100,'Error: '+err); }
+    refreshNext();
+  }
+
+  // ---- recipients (chosen from real users/groups) ----
+  function addRecip(val, label){ val=(val||'').trim(); if(!val) return;
+    if(recipients.some(r=>r.val===val)) return; recipients.push({val, label:label||val}); renderChips(); }
+  function renderChips(){ $('uwChips').innerHTML=''; recipients.forEach(r=>{
+    const c=document.createElement('span'); c.className='uw-chip';
+    c.innerHTML = `${r.label} <b>&times;</b>`;
+    c.querySelector('b').addEventListener('click',()=>{ recipients.splice(recipients.indexOf(r),1); renderChips(); });
+    $('uwChips').appendChild(c); }); }
+  function pickFrom(selId, prefix){ const s=$(selId); if(!s||!s.value) return;
+    const label = s.options[s.selectedIndex].textContent.trim();
+    addRecip(s.value, (prefix||'')+label); s.value=''; }
+  // Selecting an option adds it immediately — no separate Add button.
+  $('uwUserSel').addEventListener('change', ()=>pickFrom('uwUserSel'));
+  if($('uwGroupSel')) $('uwGroupSel').addEventListener('change', ()=>pickFrom('uwGroupSel', '👥 '));
+  $('uwPublic').addEventListener('change', e=>{ $('uwPublicOpts').hidden=!e.target.checked; });
+  // Expiry: presets, with a custom date option that reveals the date picker.
+  $('uwExpirySel').addEventListener('change', e=>{
+    const custom = e.target.value === 'custom';
+    $('uwExpiry').hidden = !custom;
+    if(!custom) $('uwExpiry').value='';
+  });
+
+  // ---- nav ----
+  $('uwNext').addEventListener('click', ()=>{ if(step===1) goStep(2); else if(step===2) goStep(3); });
+  $('uwBack').addEventListener('click', ()=>{ goStep(step===3?2:1); });
+
+  function showErr(msg){ const e=$('uwErr'); e.textContent=msg; e.hidden=false; }
+
+  $('uwSend').addEventListener('click', async ()=>{
+    $('uwErr').hidden=true;
+    const uuids = files.filter(f=>f.status==='done').map(f=>f.uuid);
+    if(!uuids.length){ showErr('No uploaded files to send.'); return; }
+    // Destination required — no "black hole" sends.
+    if(!recipients.length && !$('uwPublic').checked){
+      showErr('Choose at least one recipient or group, or enable a public link — otherwise the file is shared with no one.');
+      return;
+    }
+    $('uwSend').disabled=true; $('uwSend').textContent='Sending…';
+    // Expiry: a preset (days), a custom date, or none ("Keep forever").
+    const exSel = $('uwExpirySel').value;
+    const payload={ file_uuids:uuids, description:$('uwDesc').value, message:$('uwMsg').value,
+      category_id:$('uwCat').value||null,
+      expiry_date:(exSel==='custom' ? ($('uwExpiry').value||null) : null),
+      expiry_days:(exSel && exSel!=='custom' ? parseInt(exSel,10) : null),
+      notify:$('uwNotify').checked, recipients:recipients.map(r=>r.val),
+      make_public:$('uwPublic').checked, public_email_verify:$('uwVerify').checked,
+      download_limit:$('uwLimit').value||null };
+    try{
+      const r = await fetch(U.finalize,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d = await r.json();
+      if(!d.ok){ showErr(d.error||'Failed to send.'); $('uwSend').disabled=false; $('uwSend').textContent='Send Files ✓'; return; }
+      const links = d.public_links||[];
+      $('uwDoneTitle').textContent = links.length
+        ? (links.length>1 ? '✓ Public links created' : '✓ Public link created')
+        : '✓ Files sent';
+      let msg = `${d.activated} file(s) ${links.length ? 'ready to share' : 'sent'}`;
+      if(d.unresolved && d.unresolved.length) msg += ` · skipped unknown recipients: ${d.unresolved.join(', ')}`;
+      $('uwDoneMsg').textContent = msg;
+      $('uwDoneLinks').innerHTML = links.map((l,i)=>
+        `<div class="uw-link"><div class="nm">${l.name}</div>
+          <div class="urlrow">
+            <input type="text" readonly value="${l.url}" id="uwLnk${i}">
+            <button type="button" class="mini" data-copy="uwLnk${i}">Copy</button>
+            <a class="mini" href="${l.url}" target="_blank" rel="noopener">Open</a>
+          </div></div>`).join('');
+      $('uwDoneLinks').querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>{
+        const inp=document.getElementById(b.dataset.copy); inp.select();
+        navigator.clipboard.writeText(inp.value).then(()=>{ const t=b.textContent; b.textContent='Copied ✓';
+          setTimeout(()=>b.textContent=t,1500); }).catch(()=>document.execCommand('copy'));
+      }));
+      $('uwSend').hidden=true; $('uwStatus').textContent=''; goStep('done');
+      $('uwCancel').addEventListener('click', ()=>{ window.location=U.mine; }, {once:true});
+    }catch(err){ showErr('Error: '+err); $('uwSend').disabled=false; $('uwSend').textContent='Send Files ✓'; }
+  });
+
+  // ---- open/close wiring ----
+  document.addEventListener('click', e=>{
+    const trigger = e.target.closest('[data-uw-open]');
+    if(trigger){ e.preventDefault(); open(trigger.dataset.uwGroup || ''); }
+    if(e.target.closest('[data-uw-close]')){ e.preventDefault(); if(step==='done') window.location=U.mine; else close(); }
+    if(e.target===m) close();
+  });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !m.hidden) close(); });
+})();
+</script>
+{% endif %}

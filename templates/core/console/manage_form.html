@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{% if is_new %}New{% else %}Edit{% endif %} {{ resource.label }} — Admin{% endblock %}
+{% block content %}
+<div class="page-head"><h1>{% if is_new %}New{% else %}Edit{% endif %} {{ resource.label }}</h1>
+  <div class="sub"><a href="{% url 'core:manage_list' key=resource.key %}">&larr; Back to {{ resource.label|lower }}</a></div></div>
+
+<div class="card form-card">
+  {% include "core/console/_manage_form.html" %}
+</div>
+{% endblock %}

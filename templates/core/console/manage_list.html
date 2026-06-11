@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ resource.label }} — Admin{% endblock %}
+{% block content %}
+<div class="page-head"><h1>{{ resource.label }}</h1>
+  <div class="sub"><a href="{% url 'core:console_home' %}">&larr; Admin console</a></div></div>
+
+<div class="toolbar">
+  <form method="get" style="display:flex;gap:8px;">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search {{ resource.label|lower }}…">
+    <button class="btn-sm" type="submit">Search</button>
+  </form>
+  <span class="spacer"></span>
+  {% if resource.can_create %}
+    <a href="{% url 'core:manage_new' key=resource.key %}" class="btn btn-sm" data-modal>+ New {{ resource.label }}</a>
+  {% endif %}
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      {% for h in headers %}<th>{{ h }}</th>{% endfor %}
+      <th style="text-align:right;">Actions</th>
+    </tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        {% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}
+        <td class="row-actions" style="text-align:right;white-space:nowrap;">
+          {% if resource.can_edit %}<a href="{% url 'core:manage_edit' key=resource.key pk=row.pk %}" data-modal>Edit</a>{% endif %}
+          {% if resource.can_delete %}<a href="{% url 'core:manage_delete' key=resource.key pk=row.pk %}" data-modal style="color:var(--red);">Delete</a>{% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="{{ headers|length|add:1 }}" class="hint">No records.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% include "core/console/_pager.html" %}
+{% include "core/console/_modal.html" %}
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Log in — MMFileTransfer{% endblock %}
+{% block content %}
+<div class="card" style="max-width:420px; margin:40px auto;">
+  <h1 style="margin-top:0; font-size:22px;">Log in</h1>
+  {% if form.non_field_errors %}
+    <ul class="errorlist">
+      {% for err in form.non_field_errors %}<li>{{ err }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  <form method="post" action="{% url 'accounts:login' %}">
+    {% csrf_token %}
+    <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+    {{ form.username }}
+    {% for err in form.username.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
+
+    <label for="{{ form.password.id_for_label }}">Password</label>
+    {{ form.password }}
+    {% for err in form.password.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
+
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit">Log in</button>
+  </form>
+</div>
+{% endblock %}

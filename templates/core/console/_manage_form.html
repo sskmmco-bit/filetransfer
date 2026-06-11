@@ -1,0 +1,24 @@
+<h2 style="margin-top:0;font-size:18px;">{% if form.instance.pk %}Edit{% else %}New{% endif %} {{ resource.label }}</h2>
+{% if form.non_field_errors %}<div class="flash error">{{ form.non_field_errors }}</div>{% endif %}
+<form method="post"
+      action="{% if form.instance.pk %}{% url 'core:manage_edit' key=resource.key pk=form.instance.pk %}{% else %}{% url 'core:manage_new' key=resource.key %}{% endif %}"
+      data-cform>
+  {% csrf_token %}
+  {% for field in form %}
+    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+    {% if field.field.widget.input_type == "checkbox" and field.name != "permissions" %}
+      <div>{{ field }} <span class="hint">{{ field.help_text }}</span></div>
+    {% elif field.name == "permissions" or field.name == "members" %}
+      <div class="checkbox-list">{{ field }}</div>
+      {% if field.help_text %}<div class="hint">{{ field.help_text }}</div>{% endif %}
+    {% else %}
+      {{ field }}
+      {% if field.help_text %}<div class="hint">{{ field.help_text }}</div>{% endif %}
+    {% endif %}
+    {% for err in field.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
+  {% endfor %}
+  <div style="margin-top:18px;">
+    <button type="submit">Save</button>
+    <a data-cancel href="{% url 'core:manage_list' key=resource.key %}" class="btn btn-ghost btn-sm" style="margin-left:8px;">Cancel</a>
+  </div>
+</form>

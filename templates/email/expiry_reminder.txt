@@ -1,0 +1,10 @@
+Subject: A file is about to expire on MMFileTransfer
+
+Hello,
+
+This is a reminder that the following file will expire on {{ file.expiry_date }}:
+
+  {{ file.display_name }} ({{ file.original_filename }})
+
+After it expires it will no longer be available for download. Please download it
+before then if you still need it.

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Login attempts — MMFileTransfer{% endblock %}
+{% block content %}
+<h1>Login attempts</h1>
+<p><a href="{% url 'core:console_home' %}">&larr; Console</a></p>
+<div class="card">
+  <table style="width:100%; border-collapse:collapse;">
+    <thead><tr style="text-align:left; border-bottom:2px solid #e2e8f0;">
+      <th style="padding:8px;">When</th><th style="padding:8px;">Identifier</th>
+      <th style="padding:8px;">IP</th><th style="padding:8px;">Result</th>
+    </tr></thead>
+    <tbody>
+      {% for a in page %}
+      <tr style="border-bottom:1px solid #eef2f7;">
+        <td style="padding:8px;">{{ a.created_at|date:"Y-m-d H:i:s" }}</td>
+        <td style="padding:8px;">{{ a.identifier }}</td>
+        <td style="padding:8px;">{{ a.ip_address|default:"—" }}</td>
+        <td style="padding:8px; color:{% if a.successful %}#2e7d32{% else %}#c0392b{% endif %};">
+          {% if a.successful %}success{% else %}failed{% endif %}</td>
+      </tr>
+      {% empty %}<tr><td colspan="4" style="padding:8px; color:#5d6d7e;">No entries.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% include "core/console/_pager.html" %}
+{% endblock %}

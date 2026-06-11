@@ -1,0 +1,17 @@
+{% comment %}Renders one bound form field. Pass `field`. Checkboxes get inline layout.{% endcomment %}
+{% if field.field.widget.input_type == "checkbox" %}
+  <div class="set-field set-check">
+    {{ field }}
+    <div>
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {% if field.help_text %}<div class="hint">{{ field.help_text }}</div>{% endif %}
+    </div>
+  </div>
+{% else %}
+  <div class="set-field">
+    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+    {{ field }}
+    {% if field.help_text %}<div class="hint">{{ field.help_text }}</div>{% endif %}
+  </div>
+{% endif %}
+{% for err in field.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}

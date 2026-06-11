@@ -1,0 +1,205 @@
+"""Files domain model (§5.5, §5.8).
+
+The lifecycle is a small, explicit state machine (§5.6.2):
+
+    uploading -> pending_metadata -> active -> deleted
+
+`complete transfer` (bytes written + validated) and `activate file` (metadata
+saved, file goes live) are deliberately distinct steps — never both "finalize".
+Blobs live in MinIO: a temp object during upload, copied to its final key
+`files/{year}/{month}/{uuid}-{name}` on activation. Public-link and
+encryption-at-rest columns arrive in Phase 3 / Phase 6.
+"""
+from __future__ import annotations
+
+import uuid
+
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+from django.utils.text import slugify
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    slug = models.SlugField(max_length=90, unique=True, blank=True)
+    description = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "files_category"
+        ordering = ("name",)
+        verbose_name_plural = "categories"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)[:90]
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class FileStatus(models.TextChoices):
+    UPLOADING = "uploading", "Uploading"
+    PENDING_METADATA = "pending_metadata", "Pending metadata"
+    ACTIVE = "active", "Active"
+    DELETED = "deleted", "Deleted"
+
+
+class StoredFile(models.Model):
+    """A single stored file and its metadata; one MinIO object backs it."""
+
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="uploaded_files"
+    )
+
+    # Transfer facts (set during Step 1).
+    original_filename = models.CharField(max_length=255)
+    size = models.BigIntegerField(default=0)
+    content_type = models.CharField(max_length=128, blank=True)
+    sha256 = models.CharField(max_length=64, blank=True)
+
+    # Object keys: a temp key while uploading, a final key once active.
+    temp_key = models.CharField(max_length=512, blank=True)
+    storage_key = models.CharField(max_length=512, blank=True)
+    thumbnail_key = models.CharField(max_length=512, blank=True)
+
+    # Metadata (collected in Step 2).
+    title = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    # Optional personal note shown to recipients (in the assignment email).
+    message = models.TextField(blank=True)
+    categories = models.ManyToManyField(Category, blank=True, related_name="files")
+    # Groups this file is placed into (a shared space). Membership is dynamic:
+    # anyone currently in the group sees the file, even if they joined later.
+    # Distinct from per-recipient FileAssignment (which drives email + inbox).
+    groups = models.ManyToManyField(
+        "accounts.Group", blank=True, related_name="files"
+    )
+    is_hidden = models.BooleanField(default=False)
+    # Admin-defined custom metadata values, keyed by CustomField.key (Phase 5).
+    custom_fields = models.JSONField(default=dict, blank=True)
+
+    # Public sharing (link minting is Phase 3; the columns live here now).
+    is_public = models.BooleanField(default=False)
+    public_token = models.CharField(max_length=64, blank=True, db_index=True)
+    public_require_email_verify = models.BooleanField(default=False)
+
+    # Limits / expiry.
+    expiry_date = models.DateField(null=True, blank=True)
+    download_limit = models.PositiveIntegerField(null=True, blank=True)
+    download_count = models.PositiveIntegerField(default=0)
+
+    status = models.CharField(
+        max_length=20, choices=FileStatus.choices, default=FileStatus.UPLOADING, db_index=True
+    )
+
+    created_at = models.DateTimeField(default=timezone.now)
+    uploaded_at = models.DateTimeField(null=True, blank=True)  # set on activation
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "files_stored_file"
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["owner", "status"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return self.title or self.original_filename
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == FileStatus.ACTIVE
+
+    @property
+    def display_name(self) -> str:
+        return self.title or self.original_filename
+
+    def build_storage_key(self) -> str:
+        """Final key layout: files/{year}/{month}/{uuid}-{name} (§5.5)."""
+        now = self.uploaded_at or timezone.now()
+        return f"files/{now:%Y}/{now:%m}/{self.uuid}-{self.original_filename}"
+
+    @property
+    def is_expired(self) -> bool:
+        return bool(self.expiry_date and self.expiry_date < timezone.localdate())
+
+    def download_limit_reached(self) -> bool:
+        return bool(self.download_limit is not None and self.download_count >= self.download_limit)
+
+
+class UploadSession(models.Model):
+    """Tracks an in-progress transfer; maps a chunked upload to MinIO multipart.
+
+    Exactly one session per StoredFile in flight. Sessions expire after ~24h;
+    the purge task hard-deletes abandoned ones and removes their temp objects.
+    """
+
+    token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    stored_file = models.OneToOneField(
+        StoredFile, on_delete=models.CASCADE, related_name="upload_session"
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="upload_sessions"
+    )
+
+    is_chunked = models.BooleanField(default=False)
+    multipart_upload_id = models.CharField(max_length=255, blank=True)
+    # Completed parts for the S3 multipart: [{"PartNumber": n, "ETag": "..."}].
+    parts = models.JSONField(default=list, blank=True)
+
+    declared_size = models.BigIntegerField(default=0)
+    received_size = models.BigIntegerField(default=0)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "files_upload_session"
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = (self.created_at or timezone.now()) + timezone.timedelta(hours=24)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"session {self.token} ({self.stored_file_id})"
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    def next_part_number(self) -> int:
+        return len(self.parts) + 1
+
+
+class FileAssignment(models.Model):
+    """One row per recipient a file is assigned to (§5.5/§5.8)."""
+
+    stored_file = models.ForeignKey(
+        StoredFile, on_delete=models.CASCADE, related_name="assignments"
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="file_assignments"
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assignments_made",
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    notified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "files_file_assignment"
+        unique_together = (("stored_file", "recipient"),)
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.stored_file_id} -> {self.recipient_id}"

@@ -1,0 +1,20 @@
+{% if page.paginator.num_pages > 1 %}
+<div class="fpager">
+  <span class="fpager-info">
+    Showing {{ page.start_index }}–{{ page.end_index }} of {{ page.paginator.count }}
+  </span>
+  <div class="fpager-btns">
+    {% if page.has_previous %}
+      <a class="btn-ghost" href="?page={{ page.previous_page_number }}">← Prev</a>
+    {% else %}
+      <span class="btn-ghost disabled">← Prev</span>
+    {% endif %}
+    <span class="fpager-num">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}
+      <a class="btn-ghost" href="?page={{ page.next_page_number }}">Next →</a>
+    {% else %}
+      <span class="btn-ghost disabled">Next →</span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}File details — MMFileTransfer{% endblock %}
+{% block content %}
+<h1>Add details</h1>
+<p style="color:#5d6d7e;">
+  Transfer complete: <strong>{{ file.original_filename }}</strong>
+  ({{ file.size }} bytes, {{ file.content_type }}). Save to activate the file.
+</p>
+
+<div class="card" style="max-width:640px;">
+  <form method="post">
+    {% csrf_token %}
+    {% for field in form %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<div class="hint" style="color:#5d6d7e;font-size:12px;">{{ field.help_text }}</div>{% endif %}
+      {% for err in field.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
+    {% endfor %}
+    <button type="submit">Save &amp; activate</button>
+  </form>
+</div>
+{% endblock %}

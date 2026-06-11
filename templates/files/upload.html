@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Upload — MMFileTransfer{% endblock %}
+{% block content %}
+<h1>Upload a file</h1>
+{% if error %}<div class="errornote">{{ error }}</div>{% endif %}
+
+<div class="card" style="max-width:560px;">
+  <p class="hint" style="color:#5d6d7e;">
+    Files up to 50&nbsp;MiB upload directly; larger files use the resumable
+    chunked uploader automatically.
+  </p>
+
+  <input type="file" id="fileInput">
+  <button id="uploadBtn" type="button">Upload</button>
+
+  <div id="progressWrap" style="display:none; margin-top:16px;">
+    <div style="background:#e2e8f0; border-radius:6px; overflow:hidden;">
+      <div id="progressBar" style="width:0%; height:14px; background:var(--blue);"></div>
+    </div>
+    <div id="progressText" class="hint" style="color:#5d6d7e; margin-top:6px;">0%</div>
+  </div>
+</div>
+
+<script>
+const CHUNK_THRESHOLD = {{ chunk_threshold }};
+const csrftoken = "{{ csrf_token }}";
+const urls = {
+  direct: "{% url 'files:upload' %}",
+  init: "{% url 'files:init_upload' %}",
+  chunk: "{% url 'files:upload_chunk' %}",
+  complete: "{% url 'files:upload_complete' %}",
+};
+
+function setProgress(pct, text) {
+  document.getElementById("progressWrap").style.display = "block";
+  document.getElementById("progressBar").style.width = pct + "%";
+  document.getElementById("progressText").textContent = text || (pct + "%");
+}
+
+async function directUpload(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  setProgress(20, "Uploading…");
+  const r = await fetch(urls.direct, {method: "POST", headers: {"X-CSRFToken": csrftoken}, body: fd});
+  if (r.redirected) { window.location = r.url; return; }
+  const html = await r.text();
+  document.open(); document.write(html); document.close();
+}
+
+async function chunkedUpload(file) {
+  setProgress(0, "Starting…");
+  let r = await fetch(urls.init, {
+    method: "POST",
+    headers: {"X-CSRFToken": csrftoken, "Content-Type": "application/json"},
+    body: JSON.stringify({filename: file.name, size: file.size}),
+  });
+  const {token, part_size} = await r.json();
+
+  let offset = 0;
+  while (offset < file.size) {
+    const blob = file.slice(offset, offset + part_size);
+    const fd = new FormData();
+    fd.append("token", token);
+    fd.append("chunk", blob);
+    await fetch(urls.chunk, {method: "POST", headers: {"X-CSRFToken": csrftoken}, body: fd});
+    offset += part_size;
+    setProgress(Math.min(99, Math.round(offset / file.size * 100)), "Uploading…");
+  }
+
+  r = await fetch(urls.complete, {
+    method: "POST",
+    headers: {"X-CSRFToken": csrftoken, "Content-Type": "application/json"},
+    body: JSON.stringify({token}),
+  });
+  const data = await r.json();
+  if (data.redirect) { window.location = data.redirect; }
+  else { setProgress(100, "Error: " + (data.error || "upload failed")); }
+}
+
+document.getElementById("uploadBtn").addEventListener("click", () => {
+  const file = document.getElementById("fileInput").files[0];
+  if (!file) { alert("Choose a file first."); return; }
+  (file.size > CHUNK_THRESHOLD ? chunkedUpload : directUpload)(file);
+});
+</script>
+{% endblock %}
