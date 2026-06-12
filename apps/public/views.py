@@ -32,7 +32,7 @@ from apps.files import services, storage
 from apps.files.models import FileStatus, StoredFile
 from apps.notifications.email import send_public_verification_code
 
-from .forms import CodeForm, EmailForm
+from .forms import CodeForm, EmailForm, PasswordForm
 from .models import PublicDownloadVerification
 
 GRANT_TTL_SECONDS = 3600           # anonymous grant lifetime (~1h)
@@ -56,48 +56,104 @@ def _bundle_file(token: str, uuid):
     )
 
 
-def _requires_verify(files) -> bool:
+def _needs_verify(files) -> bool:
     return any(f.public_require_email_verify for f in files)
+
+
+def _needs_password(files) -> bool:
+    return any(f.public_password_hash for f in files)
 
 
 def _grant_key(token: str) -> str:
     return f"public_grant:{token}"
 
 
-def _has_valid_grant(request, token: str) -> bool:
+def _pw_key(token: str) -> str:
+    return f"public_pw:{token}"
+
+
+def _grant_ok(request, key: str, token: str) -> bool:
     from django.utils import timezone
 
-    grant = request.session.get(_grant_key(token))
+    grant = request.session.get(key)
     if not grant or grant.get("token") != token:
         return False
     return timezone.now().timestamp() < grant.get("expires", 0)
+
+
+def _has_valid_grant(request, token: str) -> bool:
+    return _grant_ok(request, _grant_key(token), token)
+
+
+def _has_pw_grant(request, token: str) -> bool:
+    return _grant_ok(request, _pw_key(token), token)
+
+
+def _gate(request, token, files):
+    """Redirect to the landing gate if a required password/verify isn't met."""
+    if _needs_password(files) and not _has_pw_grant(request, token):
+        return redirect("public:landing", token=token)
+    if _needs_verify(files) and not _has_valid_grant(request, token):
+        return redirect("public:landing", token=token)
+    return None
+
+
+def _landing_ctx(request, token, files, **extra):
+    ctx = {
+        "files": files, "token": token, "rep": files[0],
+        "total_size": sum(f.size for f in files),
+        "allow_download": files[0].public_allow_download,
+    }
+    ctx.update(extra)
+    return ctx
 
 
 # ---------------------------------------------------------------------------
 @require_http_methods(["GET"])
 def landing(request, token):
     files = list(_bundle(token))
-    ready = not _requires_verify(files) or _has_valid_grant(request, token)
-    ctx = {
-        "files": files, "token": token, "ready": ready,
-        "total_size": sum(f.size for f in files),
-        "rep": files[0],
+    need_pw = _needs_password(files) and not _has_pw_grant(request, token)
+    need_verify = _needs_verify(files) and not _has_valid_grant(request, token)
+    ready = not need_pw and not need_verify
+    extra = {"ready": ready}
+    if need_pw:
+        extra["gate"] = "password"; extra["password_form"] = PasswordForm()
+    elif need_verify:
+        extra["gate"] = "verify"; extra["email_form"] = EmailForm()
+    return render(request, "public/landing.html", _landing_ctx(request, token, files, **extra))
+
+
+@require_http_methods(["POST"])
+def submit_password(request, token):
+    from django.contrib.auth.hashers import check_password
+    from django.utils import timezone
+
+    files = list(_bundle(token))
+    rep = files[0]
+    form = PasswordForm(request.POST)
+    ok = (form.is_valid() and rep.public_password_hash
+          and check_password(form.cleaned_data["password"], rep.public_password_hash))
+    if not ok:
+        return render(request, "public/landing.html", _landing_ctx(
+            request, token, files, ready=False, gate="password",
+            password_form=form, error="Incorrect password."))
+    request.session[_pw_key(token)] = {
+        "token": token, "expires": timezone.now().timestamp() + GRANT_TTL_SECONDS,
     }
-    if not ready:
-        ctx["email_form"] = EmailForm()
-    return render(request, "public/landing.html", ctx)
+    return redirect("public:landing", token=token)
 
 
 @require_http_methods(["POST"])
 def request_code(request, token):
     files = list(_bundle(token))
     rep = files[0]
+    # Password gate (if any) must be cleared before email verification.
+    if _needs_password(files) and not _has_pw_grant(request, token):
+        return redirect("public:landing", token=token)
     form = EmailForm(request.POST)
     if not form.is_valid():
-        return render(request, "public/landing.html", {
-            "files": files, "token": token, "ready": False,
-            "total_size": sum(f.size for f in files), "rep": rep, "email_form": form,
-        })
+        return render(request, "public/landing.html", _landing_ctx(
+            request, token, files, ready=False, gate="verify", email_form=form))
 
     email = form.cleaned_data["email"]
     code = f"{secrets.randbelow(1_000_000):06d}"
@@ -154,20 +210,32 @@ def verify_code(request, token):
     return redirect("public:landing", token=token)
 
 
-def _guard_download(request, token):
-    """Return None if allowed, else a redirect to the landing/verify gate."""
+@require_http_methods(["GET"])
+def preview(request, token, uuid):
+    """Inline preview of a bundle file (no download slot consumed).
+
+    Allowed even for preview-only links — previewing is the point.
+    """
     files = list(_bundle(token))
-    if _requires_verify(files) and not _has_valid_grant(request, token):
-        return redirect("public:landing", token=token)
-    return None
+    gate = _gate(request, token, files)
+    if gate:
+        return gate
+    sf = _bundle_file(token, uuid)
+    return redirect(storage.presigned_get_url(
+        sf.storage_key, download_name=sf.original_filename,
+        inline=True, content_type=sf.content_type))
 
 
 @require_http_methods(["GET"])
 def download(request, token, uuid):
     """Download a single file from the bundle."""
-    gate = _guard_download(request, token)
+    files = list(_bundle(token))
+    gate = _gate(request, token, files)
     if gate:
         return gate
+    if not files[0].public_allow_download:
+        return render(request, "public/denied.html",
+                      {"file": files[0], "preview_only": True}, status=403)
     sf = _bundle_file(token, uuid)
 
     if services.reserve_download_slot(sf.pk) is None:
@@ -190,10 +258,13 @@ def download_all(request, token):
 
     from django.http import FileResponse
 
-    gate = _guard_download(request, token)
+    files = list(_bundle(token))
+    gate = _gate(request, token, files)
     if gate:
         return gate
-    files = list(_bundle(token))
+    if not files[0].public_allow_download:
+        return render(request, "public/denied.html",
+                      {"file": files[0], "preview_only": True}, status=403)
 
     grant = request.session.get(_grant_key(token)) or {}
     from apps.audit.models import DownloadEvent

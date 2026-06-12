@@ -20,6 +20,12 @@
     border:1px solid var(--line);background:#fff;color:var(--accent2);}
   .pb-dl:hover{background:#f0f1ff;}
   .pb-dl svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+  .pb-pv{margin-left:auto;width:36px;height:36px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);background:#fff;color:var(--muted);}
+  .pb-pv:hover{background:#f0f1ff;color:var(--accent2);}
+  .pb-pv svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+  .pb-acts{margin-left:auto;display:flex;gap:8px;}
+  .pb-acts .pb-dl,.pb-acts .pb-pv{margin-left:0;}
   .pb-foot{padding:18px 24px;}
   .pb-allbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;border-radius:12px;
     background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:600;}
@@ -34,6 +40,9 @@
     </div>
 
     {% if ready %}
+      {% if not allow_download %}
+        <div class="sub" style="padding:10px 24px 0;color:var(--muted);font-size:13px;">👁 Preview only — downloads are disabled for this link.</div>
+      {% endif %}
       {% for f in files %}
       <div class="pb-row">
         <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
@@ -41,10 +50,19 @@
           <div class="nm">{{ f.display_name }}</div>
           <div class="sz">{{ f.size|filesizeformat }}</div>
         </div>
-        <a class="pb-dl" href="{% url 'public:download' token=token uuid=f.uuid %}" title="Download">
-          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
+        <div class="pb-acts">
+          {% if f|previewable %}
+          <a class="pb-pv" href="{% url 'public:preview' token=token uuid=f.uuid %}" target="_blank" rel="noopener" title="Preview">
+            <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
+          {% endif %}
+          {% if allow_download %}
+          <a class="pb-dl" href="{% url 'public:download' token=token uuid=f.uuid %}" title="Download">
+            <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
+          {% endif %}
+        </div>
       </div>
       {% endfor %}
+      {% if allow_download %}
       <div class="pb-foot">
         {% if files|length > 1 %}
           <a class="pb-allbtn" href="{% url 'public:download_all' token=token %}">
@@ -58,9 +76,24 @@
           </a>
         {% endif %}
       </div>
+      {% endif %}
+    {% elif gate == "password" %}
+      <div class="pb-verify">
+        <p style="color:var(--muted);margin-top:0;">🔒 This link is password protected.</p>
+        {% if error %}<div class="errorlist">{{ error }}</div>{% endif %}
+        <form method="post" action="{% url 'public:submit_password' token=token %}">
+          {% csrf_token %}
+          {% for field in password_form %}
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% for err in field.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
+          {% endfor %}
+          <button type="submit" style="margin-top:12px;">Unlock</button>
+        </form>
+      </div>
     {% else %}
       <div class="pb-verify">
-        <p style="color:var(--muted);margin-top:0;">These files require email verification before download.</p>
+        <p style="color:var(--muted);margin-top:0;">These files require email verification first.</p>
         <form method="post" action="{% url 'public:request_code' token=token %}">
           {% csrf_token %}
           {% for field in email_form %}

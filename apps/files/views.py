@@ -332,20 +332,8 @@ def upload_finalize(request):
     download_limit = int(data["download_limit"]) if data.get("download_limit") else None
     notify = bool(data.get("notify", True))
 
-    # A file must have a destination: a recipient, a group, or a public link.
-    # Otherwise it would be activated but shared with nobody ("black hole").
-    if not recipient_ids and not recipient_groups and not make_public:
-        return JsonResponse(
-            {"error": "Choose at least one recipient or group, or enable a "
-                      "public link — otherwise the file is shared with no one."},
-            status=400,
-        )
-
-    # All files in one upload share a SINGLE public link (a "transfer bundle"),
-    # like WeTransfer — one token covers every file, not one link per file.
-    import secrets
-    shared_token = secrets.token_urlsafe(32) if make_public else ""
-    require_verify = bool(data.get("public_email_verify")) if make_public else False
+    # Recipients are OPTIONAL: with no destination the file simply lands in the
+    # owner's My Files (Private) and can be shared later.
 
     for sf in files:
         sf.title = sf.title or sf.original_filename
@@ -353,10 +341,8 @@ def upload_finalize(request):
         sf.message = (data.get("message") or "")[:2000]
         sf.expiry_date = expiry_date
         sf.download_limit = download_limit
-        sf.is_public = make_public
-        sf.public_require_email_verify = require_verify
         sf.save(update_fields=["title", "description", "message", "expiry_date",
-                               "download_limit", "is_public", "public_require_email_verify", "updated_at"])
+                               "download_limit", "updated_at"])
         if category:
             sf.categories.add(category)
         if recipient_groups:
@@ -366,12 +352,19 @@ def upload_finalize(request):
 
     public_links = []
     if make_public:
-        # Stamp the same token on every file (overrides the per-file token
-        # activate_file minted), so they resolve as one bundle.
-        StoredFile.objects.filter(pk__in=[f.pk for f in files]).update(
-            public_token=shared_token, is_public=True)
+        # One shared link (bundle) across every file in the upload, with the
+        # chosen access/password/preview controls.
+        token = services.configure_public_link(
+            files,
+            access=data.get("access") or "public",
+            require_verify=bool(data.get("public_email_verify")),
+            password=(data.get("password") or None),
+            allow_download=not bool(data.get("preview_only")),
+            expiry_date=expiry_date,
+            download_limit=download_limit,
+        )
         bundle_url = request.build_absolute_uri(
-            reverse("public:landing", kwargs={"token": shared_token}))
+            reverse("public:landing", kwargs={"token": token}))
         name = files[0].display_name if len(files) == 1 else f"{len(files)} files"
         public_links = [{"name": name, "url": bundle_url}]
 
@@ -462,6 +455,24 @@ def _remember_view(request, response):
     return response
 
 
+def _apply_type_filter(request, qs, field: str = "original_filename"):
+    """Narrow a queryset to the ?type= bucket (by filename extension)."""
+    from .templatetags.file_extras import type_q
+
+    key = (request.GET.get("type") or "").strip()
+    q = type_q(key, field)
+    if q is not None:
+        qs = qs.filter(q)
+    return qs, key
+
+
+def _starred_ids(request) -> set:
+    """PKs of files the current user has starred (for the ★ toggle state)."""
+    if not request.user.is_authenticated:
+        return set()
+    return set(request.user.starred_files.values_list("pk", flat=True))
+
+
 @login_required
 def my_uploads(request):
     from django.db.models import Count
@@ -478,9 +489,11 @@ def my_uploads(request):
         )
         .order_by("-created_at")
     )
+    qs, current_type = _apply_type_filter(request, qs)
     page = _paginate(request, qs)
     resp = render(request, "files/my_uploads.html",
-                  {"files": page, "page": page, "view": _view_mode(request)})
+                  {"files": page, "page": page, "view": _view_mode(request),
+                   "current_type": current_type, "starred_ids": _starred_ids(request)})
     return _remember_view(request, resp)
 
 
@@ -492,10 +505,62 @@ def my_files(request):
         )
         .select_related("stored_file", "assigned_by")
     )
+    qs, current_type = _apply_type_filter(request, qs, field="stored_file__original_filename")
     page = _paginate(request, qs)
     resp = render(request, "files/my_files.html",
-                  {"assignments": page, "page": page, "view": _view_mode(request)})
+                  {"assignments": page, "page": page, "view": _view_mode(request),
+                   "current_type": current_type, "starred_ids": _starred_ids(request)})
     return _remember_view(request, resp)
+
+
+@login_required
+def starred(request):
+    """Files the current user has starred — across owned + shared + group files."""
+    from django.db.models import Count
+
+    base = (
+        StoredFile.objects.filter(stars__user=request.user)
+        .exclude(status__in=[FileStatus.DELETED, FileStatus.UPLOADING])
+        .select_related("owner")
+        .prefetch_related("categories")
+        .annotate(
+            n_assign=Count("assignments", distinct=True),
+            n_group=Count("groups", distinct=True),
+        )
+        .order_by("-stars__created_at")
+    )
+    # Only show stars the user can still see (access could have been revoked).
+    my_group_ids = list(request.user.file_groups.values_list("pk", flat=True))
+    visible = Q(owner=request.user) | Q(assignments__recipient=request.user) | Q(is_public=True)
+    if my_group_ids:
+        visible |= Q(groups__in=my_group_ids)
+    if not request.user.has_perm_code("files.view_all"):
+        base = base.filter(visible).distinct()
+    qs, current_type = _apply_type_filter(request, base)
+    page = _paginate(request, qs)
+    resp = render(request, "files/starred.html",
+                  {"files": page, "page": page, "view": _view_mode(request),
+                   "current_type": current_type, "starred_ids": _starred_ids(request)})
+    return _remember_view(request, resp)
+
+
+@login_required
+@require_POST
+def toggle_star(request, uuid):
+    """Star/unstar a file for the current user. Returns {ok, starred}."""
+    from .models import StarredFile
+
+    sf = get_object_or_404(StoredFile, uuid=uuid)
+    if not _can_access(sf, request.user):
+        raise PermissionDenied("You do not have access to this file.")
+    existing = StarredFile.objects.filter(user=request.user, stored_file=sf)
+    if existing.exists():
+        existing.delete()
+        starred_now = False
+    else:
+        StarredFile.objects.create(user=request.user, stored_file=sf)
+        starred_now = True
+    return JsonResponse({"ok": True, "starred": starred_now})
 
 
 @login_required
@@ -517,12 +582,15 @@ def group_space(request, pk):
         .prefetch_related("categories")
         .order_by("-created_at")
     )
+    total_count = files_qs.count()
+    files_qs, current_type = _apply_type_filter(request, files_qs)
     page = _paginate(request, files_qs)
     members = group.members.order_by("first_name", "username")
     resp = render(request, "files/group_space.html", {
         "group": group, "files": page, "page": page, "members": members,
-        "is_member": is_member, "file_count": files_qs.count(),
+        "is_member": is_member, "file_count": total_count,
         "view": _view_mode(request),
+        "current_type": current_type, "starred_ids": _starred_ids(request),
     })
     return _remember_view(request, resp)
 
@@ -668,15 +736,44 @@ def download(request, uuid):
 @login_required
 @require_POST
 def manage_public_link(request, uuid):
-    """Owner action: enable, rotate, or disable the public link (§5.4)."""
+    """Owner manages the public link: enable/save, rotate, or disable (§5.4).
+
+    Settings apply across the whole bundle (every file sharing this token).
+    """
+    from datetime import date
+
     sf = get_object_or_404(StoredFile, uuid=uuid, owner=request.user, status=FileStatus.ACTIVE)
     action = request.POST.get("action")
-    if action in ("enable", "rotate"):
-        sf.public_require_email_verify = request.POST.get("require_verify") == "on"
-        sf.save(update_fields=["public_require_email_verify", "updated_at"])
-        services.ensure_public_token(sf, rotate=(action == "rotate"))
-    elif action == "disable":
+
+    if action == "disable":
         services.disable_public_link(sf)
+        return redirect("files:detail", uuid=sf.uuid)
+
+    bundle = (list(StoredFile.objects.filter(public_token=sf.public_token, owner=request.user))
+              if sf.public_token else [sf])
+
+    access = request.POST.get("access") or "public"
+    require_verify = request.POST.get("require_verify") == "on"
+    allow_download = request.POST.get("preview_only") != "on"
+    if request.POST.get("clear_password") == "on":
+        password = ""               # clear an existing password
+    elif request.POST.get("password"):
+        password = request.POST["password"]   # set a new one
+    else:
+        password = None             # leave unchanged
+    expiry_date = None
+    if request.POST.get("expiry_date"):
+        try:
+            expiry_date = date.fromisoformat(request.POST["expiry_date"])
+        except ValueError:
+            pass
+    download_limit = int(request.POST["download_limit"]) if request.POST.get("download_limit") else None
+
+    services.configure_public_link(
+        bundle, access=access, require_verify=require_verify, password=password,
+        allow_download=allow_download, expiry_date=expiry_date,
+        download_limit=download_limit, rotate=(action == "rotate"),
+    )
     return redirect("files:detail", uuid=sf.uuid)
 
 
@@ -722,6 +819,65 @@ def share(request, uuid):
         assigned_by=request.user, notify=bool(data.get("notify", True)),
     )
     return JsonResponse({"ok": True, "added": added})
+
+
+@login_required
+@require_POST
+def bulk_share(request):
+    """Share several selected files at once: to people/groups and/or one
+    public link (a bundle) covering the whole selection (§5.8)."""
+    from datetime import date
+
+    from apps.accounts.models import Group
+
+    data = json.loads(request.body or "{}")
+    files = list(StoredFile.objects.filter(
+        uuid__in=data.get("uuids", []), owner=request.user, status=FileStatus.ACTIVE))
+    if not files:
+        return JsonResponse({"error": "No accessible files selected."}, status=400)
+
+    try:
+        user_ids = {int(x) for x in data.get("user_ids", [])}
+        group_ids = {int(x) for x in data.get("group_ids", [])}
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Invalid selection."}, status=400)
+
+    groups = list(Group.objects.filter(pk__in=group_ids))
+    recipient_ids = set(user_ids)
+    for g in groups:
+        recipient_ids.update(g.members.values_list("pk", flat=True))
+    recipient_ids.discard(request.user.pk)
+
+    notify = bool(data.get("notify", True))
+    added_total = 0
+    if recipient_ids or groups:
+        for sf in files:
+            added_total += services.add_recipients(
+                sf.pk, recipient_ids=recipient_ids, groups=groups,
+                assigned_by=request.user, notify=notify)
+
+    public_url = None
+    if data.get("make_public"):
+        expiry_date = None
+        if data.get("expiry_date"):
+            try:
+                expiry_date = date.fromisoformat(data["expiry_date"])
+            except ValueError:
+                pass
+        token = services.configure_public_link(
+            files, access=data.get("access") or "public",
+            require_verify=bool(data.get("require_verify")),
+            password=(data.get("password") or None),
+            allow_download=not bool(data.get("preview_only")),
+            expiry_date=expiry_date,
+            download_limit=int(data["download_limit"]) if data.get("download_limit") else None,
+        )
+        public_url = request.build_absolute_uri(
+            reverse("public:landing", kwargs={"token": token}))
+
+    if not added_total and not public_url:
+        return JsonResponse({"error": "Pick at least one person/group, or enable a public link."}, status=400)
+    return JsonResponse({"ok": True, "added": added_total, "public_url": public_url, "files": len(files)})
 
 
 @login_required

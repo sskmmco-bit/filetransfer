@@ -14,6 +14,11 @@ Images show a thumbnail (files:thumb); other types show a coloured extension chi
     <div class="fc-sub">{{ f.original_filename|fext }} · {{ f.size|filesizeformat }}</div>
   </div>
   <div class="fc-actions">
+    {% include "files/_star_btn.html" %}
+    {% if can_share %}
+    <button type="button" class="iaction js-share-one" data-uuid="{{ f.uuid }}" title="Share">
+      <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg></button>
+    {% endif %}
     {% if f|previewable %}
     <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
       <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>

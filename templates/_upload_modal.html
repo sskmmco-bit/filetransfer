@@ -95,8 +95,8 @@ then finalizes shared metadata + recipients in one call.
   .uw-public-t{font-weight:600;font-size:14px;}
   .uw-public-s{color:var(--muted);font-size:12px;margin-top:1px;}
   .uw-public-head .switch{margin-left:auto;}
-  .uw-public-opts{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);
-    display:flex;flex-direction:column;align-items:flex-start;gap:10px;}
+  .uw-public-opts{margin-top:4px;padding-top:4px;border-top:1px solid var(--line);display:block;}
+  .uw-public-opts[hidden]{display:none;}
   .uw-foot{display:flex;align-items:center;gap:10px;padding:16px 24px;border-top:1px solid var(--line);}
   .uw-foot .spacer{flex:1;}
   .uw-done{font-size:20px;font-weight:700;color:var(--green);margin-bottom:8px;}
@@ -240,9 +240,34 @@ then finalizes shared metadata + recipients in one call.
             <label class="switch"><input type="checkbox" id="uwPublic"><span class="slider"></span></label>
           </div>
           <div id="uwPublicOpts" hidden class="uw-public-opts">
-            <label class="uw-check" style="margin-top:0;"><input type="checkbox" id="uwVerify"> Email OTP verification</label>
-            <label class="uw-check" style="margin-top:0;">Download limit
-              <input type="number" id="uwLimit" min="1" placeholder="∞" style="width:80px;margin-left:6px;"></label>
+            <div class="lnk-list">
+              <div class="lnk-row">
+                <div class="lnk-main"><div class="lnk-t">Require email verification</div>
+                  <div class="lnk-s">Visitors confirm their email before opening (tracked access).</div></div>
+                <label class="switch"><input type="checkbox" id="uwVerify"><span class="slider"></span></label>
+              </div>
+              <div class="lnk-row">
+                <div class="lnk-main"><div class="lnk-t">Preview only</div>
+                  <div class="lnk-s">Allow viewing in the browser but block downloads.</div></div>
+                <label class="switch"><input type="checkbox" id="uwPreviewOnly"><span class="slider"></span></label>
+              </div>
+              <div class="lnk-row">
+                <div class="lnk-main"><div class="lnk-t">Require password</div>
+                  <div class="lnk-s">Visitors must enter a password to open the link.</div></div>
+                <label class="switch"><input type="checkbox" id="uwPwdToggle" data-toggle="uwpwd"><span class="slider"></span></label>
+              </div>
+              <div class="lnk-reveal" data-reveal="uwpwd" hidden>
+                <input type="password" id="uwPwd" placeholder="Set a password" autocomplete="new-password">
+              </div>
+              <div class="lnk-row">
+                <div class="lnk-main"><div class="lnk-t">Limit downloads</div>
+                  <div class="lnk-s">Disable the link after a set number of downloads.</div></div>
+                <label class="switch"><input type="checkbox" id="uwLimitToggle" data-toggle="uwlimit"><span class="slider"></span></label>
+              </div>
+              <div class="lnk-reveal" data-reveal="uwlimit" hidden>
+                <input type="number" id="uwLimit" min="1" placeholder="e.g. 5">
+              </div>
+            </div>
           </div>
         </div>
         <div class="uw-err" id="uwErr" hidden></div>
@@ -299,11 +324,15 @@ then finalizes shared metadata + recipients in one call.
     files.length=0; recipients.length=0; step=1;
     $('uwFiles').innerHTML=''; $('uwChips').innerHTML=''; $('uwInput').value='';
     $('uwDesc').value=''; $('uwMsg').value=''; $('uwPublic').checked=false;
-    $('uwVerify').checked=false; $('uwLimit').value=''; $('uwPublicOpts').hidden=true;
+    $('uwPublicOpts').hidden=true;
     $('uwDoneLinks').innerHTML=''; $('uwErr').hidden=true; $('uwOverall').hidden=true;
     $('uwExpiry').value=''; $('uwExpiry').hidden=true; $('uwExpirySel').value='';
     $('uwDoneTitle').textContent='✓ Files sent';
     $('uwCat').value=''; $('uwNotify').checked=true;
+    // Reset all public-link toggles + reveals back to off/empty.
+    ['uwVerify','uwPreviewOnly','uwPwdToggle','uwLimitToggle'].forEach(id=>{ if($(id)) $(id).checked=false; });
+    if($('uwPwd')) $('uwPwd').value=''; if($('uwLimit')) $('uwLimit').value='';
+    m.querySelectorAll('.lnk-reveal').forEach(r=>r.hidden=true);
     if (window.syncSelects) window.syncSelects(m);
     goStep(1);
   }
@@ -324,6 +353,7 @@ then finalizes shared metadata + recipients in one call.
     if(n===1) $('uwNext').textContent='Next: Details';
     if(n===2) $('uwNext').textContent='Next: Recipients';
     if(n==='done'){ $('uwBack').hidden=true; }
+    if(n===3 && typeof updateSendLabel==='function') updateSendLabel();
     refreshNext();
   }
   function refreshNext(){
@@ -561,6 +591,13 @@ then finalizes shared metadata + recipients in one call.
       c.querySelector('b').addEventListener('click',function(){ recipients.splice(recipients.indexOf(r),1); renderChips(); if(!$('uwPickList').hidden) renderPickList(); });
       box.appendChild(c);
     });
+    updateSendLabel();
+  }
+  // Button reflects whether the file is actually being shared.
+  function updateSendLabel(){
+    if($('uwSend').disabled) return;
+    const shared = recipients.length || $('uwPublic').checked;
+    $('uwSend').textContent = shared ? 'Send Files ✓' : 'Save to My Files';
   }
   function renderPickList(){
     var list=$('uwPickList'), q=$('uwPickSearch').value.trim().toLowerCase();
@@ -587,7 +624,7 @@ then finalizes shared metadata + recipients in one call.
     });
     document.addEventListener('click', function(e){ if(picker && !picker.contains(e.target)) list.hidden=true; });
   })();
-  $('uwPublic').addEventListener('change', e=>{ $('uwPublicOpts').hidden=!e.target.checked; });
+  $('uwPublic').addEventListener('change', e=>{ $('uwPublicOpts').hidden=!e.target.checked; updateSendLabel(); });
   // Expiry: presets, with a custom date option that reveals the date picker.
   $('uwExpirySel').addEventListener('change', e=>{
     const custom = e.target.value === 'custom';
@@ -605,30 +642,40 @@ then finalizes shared metadata + recipients in one call.
     $('uwErr').hidden=true;
     const uuids = files.filter(f=>f.status==='done').map(f=>f.uuid);
     if(!uuids.length){ showErr('No uploaded files to send.'); return; }
-    // Destination required — no "black hole" sends.
-    if(!recipients.length && !$('uwPublic').checked){
-      showErr('Choose at least one recipient or group, or enable a public link — otherwise the file is shared with no one.');
-      return;
-    }
-    $('uwSend').disabled=true; $('uwSend').textContent='Sending…';
+    // Recipients are optional — no destination just saves to My Files.
+    $('uwSend').disabled=true; $('uwSend').textContent='Saving…';
     // Expiry: a preset (days), a custom date, or none ("Keep forever").
     const exSel = $('uwExpirySel').value;
+    const pub = $('uwPublic').checked;
+    const verify = pub && $('uwVerify').checked;
+    const wantPwd = pub && $('uwPwdToggle').checked;
+    const wantLimit = pub && $('uwLimitToggle').checked;
     const payload={ file_uuids:uuids, description:$('uwDesc').value, message:$('uwMsg').value,
       category_id:$('uwCat').value||null,
       expiry_date:(exSel==='custom' ? ($('uwExpiry').value||null) : null),
       expiry_days:(exSel && exSel!=='custom' ? parseInt(exSel,10) : null),
       notify:$('uwNotify').checked, recipients:recipients.map(r=>r.val),
-      make_public:$('uwPublic').checked, public_email_verify:$('uwVerify').checked,
-      download_limit:$('uwLimit').value||null };
+      make_public:pub,
+      access:(pub ? (verify ? 'tracked' : 'public') : 'public'),
+      public_email_verify:verify,
+      preview_only:(pub && $('uwPreviewOnly').checked),
+      password:(wantPwd ? ($('uwPwd').value||null) : null),
+      download_limit:(wantLimit ? ($('uwLimit').value||null) : null) };
     try{
       const r = await fetch(U.finalize,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const d = await readJson(r);
-      if(!d.ok){ showErr(d.error||'Failed to send.'); $('uwSend').disabled=false; $('uwSend').textContent='Send Files ✓'; return; }
+      if(!d.ok){ showErr(d.error||'Failed to send.'); $('uwSend').disabled=false; updateSendLabel(); return; }
       const links = d.public_links||[];
-      $('uwDoneTitle').textContent = links.length
-        ? (links.length>1 ? '✓ Public links created' : '✓ Public link created')
-        : '✓ Files sent';
-      let msg = `${d.activated} file(s) ${links.length ? 'ready to share' : 'sent'}`;
+      const sentToPeople = recipients.length > 0;
+      if(links.length){
+        $('uwDoneTitle').textContent = links.length>1 ? '✓ Public links created' : '✓ Public link created';
+      } else if(sentToPeople){
+        $('uwDoneTitle').textContent = '✓ Files sent';
+      } else {
+        $('uwDoneTitle').textContent = '✓ Files saved';
+      }
+      const verb = links.length ? 'ready to share' : (sentToPeople ? 'sent' : 'saved to My Files');
+      let msg = `${d.activated} file(s) ${verb}`;
       if(d.unresolved && d.unresolved.length) msg += ` · skipped unknown recipients: ${d.unresolved.join(', ')}`;
       $('uwDoneMsg').textContent = msg;
       $('uwDoneLinks').innerHTML = links.map((l,i)=>
@@ -645,7 +692,7 @@ then finalizes shared metadata + recipients in one call.
       }));
       $('uwSend').hidden=true; $('uwStatus').textContent=''; goStep('done');
       $('uwCancel').addEventListener('click', ()=>{ window.location=U.mine; }, {once:true});
-    }catch(err){ showErr('Error: '+err); $('uwSend').disabled=false; $('uwSend').textContent='Send Files ✓'; }
+    }catch(err){ showErr('Error: '+err); $('uwSend').disabled=false; updateSendLabel(); }
   });
 
   // ---- minimize / restore (Dropbox-style background uploads) ----

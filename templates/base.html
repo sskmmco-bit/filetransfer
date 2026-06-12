@@ -217,10 +217,31 @@
     .switch input:checked + .slider:before{transform:translateX(18px);}
     .switch input:focus-visible + .slider{box-shadow:0 0 0 3px var(--accent-soft);}
 
+    /* ---- Dropbox-style link / share settings rows (toggle list) ---- */
+    .lnk-list{display:flex;flex-direction:column;}
+    .lnk-row{display:flex;align-items:center;gap:14px;padding:13px 0;border-top:1px solid var(--line);}
+    .lnk-row:first-child{border-top:0;}
+    .lnk-row .lnk-main{flex:1;min-width:0;}
+    .lnk-row .lnk-t{font-weight:600;font-size:14px;color:var(--ink);}
+    .lnk-row .lnk-s{color:var(--muted);font-size:12px;margin-top:2px;line-height:1.4;}
+    .lnk-reveal{padding:2px 0 12px;}
+    .lnk-reveal[hidden]{display:none;}
+    .lnk-reveal input,.lnk-reveal select{width:100%;margin:0;}
+    .lnk-reveal .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    .lnk-card{border:1px solid var(--line);border-radius:14px;padding:4px 16px;background:#fafbf7;}
+    .lnk-urlrow{display:flex;gap:8px;margin:4px 0 0;}
+    .lnk-urlrow input{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:12px;
+      background:#f7f8fd;color:#475569;font-family:ui-monospace,Menlo,Consolas,monospace;}
+    .lnk-mini{padding:9px 12px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid var(--line);
+      background:#fff;color:var(--accent2);cursor:pointer;white-space:nowrap;}
+    .lnk-mini:hover{background:#f5f6ff;}
+    .lnk-mini.danger{color:var(--red);border-color:#f3c9c4;}
+    .lnk-mini.danger:hover{background:#fdf3f2;}
+
     /* ---- shared file list (My Files / Shared with Me / Group space) ---- */
     .flist{display:flex;flex-direction:column;}
     .flist-head,.frow{display:grid;align-items:center;gap:14px;
-      grid-template-columns:1fr 110px 96px 150px 120px;padding:0 6px;}
+      grid-template-columns:1fr 110px 96px 150px;padding:0 6px;}
     .flist-head{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
       padding-bottom:10px;border-bottom:1px solid var(--line);font-weight:600;}
     .frow{padding:11px 6px;border-bottom:1px solid #f1f3f9;border-radius:10px;transition:background .12s;}
@@ -244,12 +265,31 @@
     .fbadge.team{background:var(--accent-soft);color:var(--accent2);}
     .fbadge.priv{background:#eef1f7;color:#64748b;}
     .factions{display:flex;align-items:center;gap:6px;justify-content:flex-end;}
+    /* Actions live at the right end of the name cell (Dropbox-style), just
+       before the metadata columns — no reserved column, so no idle gap. */
+    .fmain > .factions{margin-left:auto;flex:none;padding-left:10px;}
     .iaction{width:32px;height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
       color:var(--muted);background:transparent;border:0;cursor:pointer;padding:0;}
     .iaction:hover{background:var(--accent-soft);color:var(--accent2);}
     .iaction.danger:hover{background:var(--red-bg);color:var(--red);}
     .iaction svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;
       stroke-linecap:round;stroke-linejoin:round;}
+    /* Dropbox-style: row actions appear on hover; a set star stays visible. */
+    .frow .factions .iaction,.file-card .fc-actions .iaction{opacity:0;transition:opacity .12s;}
+    .frow:hover .factions .iaction,.frow:focus-within .factions .iaction,
+    .file-card:hover .fc-actions .iaction,.file-card:focus-within .fc-actions .iaction{opacity:1;}
+    .istar.on{color:#f5b301;opacity:1 !important;}
+    .istar.on svg{fill:#f5b301;stroke:#f5b301;}
+    .istar:hover{color:#f5b301;}
+    @media (hover:none){ .frow .factions .iaction,.file-card .fc-actions .iaction{opacity:1;} }
+
+    /* ---- file type filter chips ---- */
+    .filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+    .fchip{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;
+      border:1px solid var(--line);background:#fff;color:var(--muted);font-size:13px;font-weight:600;
+      cursor:pointer;transition:.12s;white-space:nowrap;}
+    .fchip:hover{border-color:#d3e6c5;color:var(--accent2);text-decoration:none;}
+    .fchip.on{background:var(--accent-soft);border-color:#d3e6c5;color:var(--accent2);}
     .flist-bulk{display:flex;align-items:center;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
     /* selection action bar — shown above the list only when rows are selected */
     .flist-actionbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:10px 14px;
@@ -297,7 +337,7 @@
     }
   </style>
 </head>
-<body>
+<body data-page="{% block bodypage %}{% endblock %}">
   {% with vn=request.resolver_match.view_name %}
   {% block fullpage %}
   <div class="app">
@@ -319,6 +359,8 @@
         <svg viewBox="0 0 24 24"><path d="M4 4h7l2 2h7v12H4z"/></svg> My Files</a>
       <a href="{% url 'files:my_files' %}" class="nav-item {% if vn == 'files:my_files' %}active{% endif %}">
         <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg> Shared with Me</a>
+      <a href="{% url 'files:starred' %}" class="nav-item {% if vn == 'files:starred' %}active{% endif %}">
+        <svg viewBox="0 0 24 24"><path d="M12 2l3 6.5 7 .9-5 4.8 1.3 7L12 18l-6.6 3.2 1.3-7-5-4.8 7-.9z"/></svg> Starred</a>
 
       {% if my_groups %}
       <div class="nav-label">My Groups</div>
@@ -625,6 +667,46 @@
       location.replace(u.toString());
     }
   })();
+  </script>
+
+  {# ---- global toggle→reveal wiring: [data-toggle="x"] shows [data-reveal="x"] ---- #}
+  <script>
+  window.wireToggleReveals = function(root){
+    root = root || document;
+    root.querySelectorAll('[data-toggle]').forEach(function(t){
+      if (t.dataset.wired) return; t.dataset.wired = '1';
+      var key = t.getAttribute('data-toggle');
+      var target = root.querySelector('[data-reveal="' + key + '"]') || document.querySelector('[data-reveal="' + key + '"]');
+      var sync = function(){ if (target) target.hidden = !t.checked; };
+      t.addEventListener('change', sync); sync();
+    });
+  };
+  document.addEventListener('DOMContentLoaded', function(){ window.wireToggleReveals(document); });
+  </script>
+
+  {# ---- global ★ star toggle (works on any file list) ---- #}
+  <script>
+  window.CSRF = "{{ csrf_token }}";
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest('[data-star]');
+    if(!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    if(btn.dataset.busy) return; btn.dataset.busy = '1';
+    fetch(btn.getAttribute('data-star'), {method:'POST',
+      headers:{'X-CSRFToken':window.CSRF,'X-Requested-With':'XMLHttpRequest'}})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        delete btn.dataset.busy;
+        if(!d || !d.ok) return;
+        btn.classList.toggle('on', d.starred);
+        btn.title = d.starred ? 'Starred' : 'Star';
+        // On the Starred page, unstarring removes the row/card.
+        if(!d.starred && document.body.dataset.page === 'starred'){
+          var row = btn.closest('.frow') || btn.closest('.file-card');
+          if(row) row.remove();
+        }
+      }).catch(function(){ delete btn.dataset.busy; });
+  });
   </script>
   {% endblock %}
   {% endwith %}

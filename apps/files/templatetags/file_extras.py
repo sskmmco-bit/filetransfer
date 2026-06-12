@@ -15,9 +15,63 @@ _ZIP = {"zip", "rar", "7z", "tar", "gz", "bz2"}
 _CODE = {"py", "js", "ts", "json", "html", "css", "java", "go", "rb", "sh", "sql", "xml", "yml", "yaml"}
 
 
+# Type filter keys -> the extensions they cover. Keys line up with the icon
+# classes from ftype() so a chosen filter matches the icon a user sees.
+TYPE_EXTENSIONS = {
+    "doc": _DOC | _SHEET,
+    "img": _IMG,
+    "vid": _VID | _AUD,
+    "zip": _ZIP,
+    "code": _CODE,
+}
+_ALL_KNOWN_EXTS = set().union(*TYPE_EXTENSIONS.values())
+
+# Order + labels for the filter chip bar (empty key = All).
+TYPE_FILTERS = [
+    ("", "All"),
+    ("doc", "Documents"),
+    ("img", "Images"),
+    ("vid", "Media"),
+    ("zip", "Archives"),
+    ("code", "Code"),
+    ("other", "Other"),
+]
+
+
+def type_q(key: str, field: str = "original_filename"):
+    """A Q filtering rows to a type bucket by filename extension, or None.
+
+    `field` lets callers reach through a relation (e.g. 'stored_file__original_filename').
+    'other' = anything not in a known bucket.
+    """
+    from django.db.models import Q
+
+    key = (key or "").strip()
+    if not key:
+        return None
+    if key == "other":
+        known = Q()
+        for e in _ALL_KNOWN_EXTS:
+            known |= Q(**{f"{field}__iendswith": "." + e})
+        return ~known
+    exts = TYPE_EXTENSIONS.get(key)
+    if not exts:
+        return None
+    q = Q()
+    for e in exts:
+        q |= Q(**{f"{field}__iendswith": "." + e})
+    return q
+
+
 def _ext(name: str) -> str:
     name = name or ""
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+@register.simple_tag
+def file_type_filters():
+    """The (key, label) chips for the type filter bar."""
+    return TYPE_FILTERS
 
 
 @register.filter

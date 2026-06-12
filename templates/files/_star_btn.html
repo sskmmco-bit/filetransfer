@@ -1,0 +1,6 @@
+{% comment %}★ favourite toggle. Expects `f` (StoredFile) and `starred_ids` in context.{% endcomment %}
+<button type="button" class="iaction istar{% if f.pk in starred_ids %} on{% endif %}"
+        data-star="{% url 'files:toggle_star' uuid=f.uuid %}"
+        title="{% if f.pk in starred_ids %}Starred{% else %}Star{% endif %}" aria-label="Star">
+  <svg viewBox="0 0 24 24"><path d="M12 2l2.9 6.3 6.9.6-5.2 4.6 1.6 6.8L12 17.3 5.8 20.9l1.6-6.8L2.2 8.9l6.9-.6z"/></svg>
+</button>

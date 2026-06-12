@@ -15,21 +15,23 @@
 </div>
 
 <div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
-  {% if files %}
-  <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;">
+    {% include "files/_filter_bar.html" %}
     {% include "files/_view_toggle.html" %}
   </div>
+  {% if files %}
   <form method="post" action="{% url 'files:download_zip' %}" id="filesForm">
     {% csrf_token %}
     <div class="flist-actionbar" id="bulkBar" hidden>
       <span id="bulkCount">0 selected</span>
       <span style="flex:1;"></span>
+      <button type="button" id="bulkShareBtn" class="btn-sm">↗ Share selected</button>
       <button type="submit" id="zipBtn" class="btn-ghost btn-sm" formaction="{% url 'files:download_zip' %}">⬇ Download ZIP</button>
       <button type="submit" id="bulkDelBtn" class="btn-danger btn-sm" formaction="{% url 'files:bulk_delete' %}">🗑 Delete selected</button>
     </div>
     {% if view == 'grid' %}
     <div class="file-grid">
-      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True can_delete=True %}{% endfor %}
+      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True can_delete=True can_share=True %}{% endfor %}
     </div>
     {% else %}
     <div class="flist">
@@ -38,7 +40,6 @@
         <span>Access</span>
         <span class="h-size">Size</span>
         <span class="h-date">Created</span>
-        <span style="text-align:right;">Actions</span>
       </div>
       {% for f in files %}
       <div class="frow">
@@ -51,6 +52,23 @@
               {% if f.status == 'active' %}{{ f.download_count }} download{{ f.download_count|pluralize }}{% if f.expiry_date %} · expires {{ f.expiry_date|date:"M j" }}{% endif %}{% else %}{{ f.get_status_display }}{% endif %}
             </div>
           </div>
+          <div class="factions">
+            {% include "files/_star_btn.html" %}
+            {% if f.status == 'active' %}
+            <button type="button" class="iaction js-share-one" data-uuid="{{ f.uuid }}" title="Share">
+              <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg></button>
+            {% endif %}
+            {% if f|previewable %}
+            <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
+              <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
+            {% endif %}
+            {% if f.status == 'active' %}
+            <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
+            {% endif %}
+            <button type="button" class="iaction danger js-del" data-url="{% url 'files:delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
+              <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
+          </div>
         </div>
         <div>
           {% with acc=f|faccess %}
@@ -61,18 +79,6 @@
         </div>
         <div class="fsize">{{ f.size|filesizeformat }}</div>
         <div class="fdate">{{ f.created_at|date:"M j, Y" }}</div>
-        <div class="factions">
-          {% if f|previewable %}
-          <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
-            <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
-          {% endif %}
-          {% if f.status == 'active' %}
-          <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
-            <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
-          {% endif %}
-          <button type="button" class="iaction danger js-del" data-url="{% url 'files:delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
-            <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
-        </div>
       </div>
       {% endfor %}
     </div>
@@ -89,6 +95,93 @@
 </div>
 
 <form id="delForm" method="post" style="display:none;">{% csrf_token %}</form>
+
+{# ---------------- Bulk share modal ---------------- #}
+<div id="bulkShareModal" class="cmodal" hidden>
+  <div class="cmodal-card">
+    <button type="button" class="cmodal-x" id="bsClose" aria-label="Close">&times;</button>
+    <h2 style="margin-top:0;">Share selected files</h2>
+    <div class="sub" id="bsCount" style="color:var(--muted);"></div>
+
+    <label style="margin-top:14px;">Share with <span class="hint">(search people &amp; groups)</span></label>
+    <div class="uw-picker" id="bsPicker">
+      <div class="uw-pick-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input type="text" id="bsSearch" class="uw-pick-search" placeholder="Search people or groups…" autocomplete="off">
+      </div>
+      <div class="uw-pick-list" id="bsPickList" hidden></div>
+    </div>
+    <div class="uw-chips" id="bsChips"></div>
+
+    {# hidden data sources for the picker #}
+    <select id="bsUserSrc" style="display:none">
+      {% for u in upload_users %}<option value="{{ u.pk }}">{{ u.get_full_name|default:u.username }}{% if u.email %} ({{ u.email }}){% endif %}</option>{% endfor %}
+    </select>
+    <select id="bsGroupSrc" style="display:none">
+      {% for g in upload_groups %}<option value="{{ g.pk }}">{{ g.name }}</option>{% endfor %}
+    </select>
+
+    <div class="lnk-card" style="margin-top:16px;">
+      <div class="lnk-list">
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Notify by email</div>
+            <div class="lnk-s">Send recipients an email about these files.</div></div>
+          <label class="switch"><input type="checkbox" id="bsNotify" checked><span class="slider"></span></label>
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Create a public link</div>
+            <div class="lnk-s">One link for everyone — covers all selected files.</div></div>
+          <label class="switch"><input type="checkbox" id="bsPublic" data-toggle="bspub"><span class="slider"></span></label>
+        </div>
+      </div>
+    </div>
+    <div class="lnk-card" data-reveal="bspub" hidden style="margin-top:10px;">
+      <div class="lnk-list">
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Require email verification</div>
+            <div class="lnk-s">Visitors confirm their email before opening (tracked).</div></div>
+          <label class="switch"><input type="checkbox" id="bsVerify"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Preview only</div>
+            <div class="lnk-s">Allow viewing in the browser but block downloads.</div></div>
+          <label class="switch"><input type="checkbox" id="bsPreview"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Require password</div>
+            <div class="lnk-s">Visitors must enter a password to open the link.</div></div>
+          <label class="switch"><input type="checkbox" id="bsPwdToggle" data-toggle="bspwd"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="bspwd" hidden>
+          <input type="password" id="bsPwd" autocomplete="new-password" placeholder="Set a password">
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Set expiration</div>
+            <div class="lnk-s">Automatically disable the link on a date.</div></div>
+          <label class="switch"><input type="checkbox" id="bsExpToggle" data-toggle="bsexp"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="bsexp" hidden>
+          <input type="date" id="bsExp">
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Limit downloads</div>
+            <div class="lnk-s">Disable the link after a set number of downloads.</div></div>
+          <label class="switch"><input type="checkbox" id="bsLimitToggle" data-toggle="bslimit"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="bslimit" hidden>
+          <input type="number" id="bsLimit" min="1" placeholder="e.g. 5">
+        </div>
+      </div>
+    </div>
+    <div id="bsResult" hidden style="margin-top:12px;"></div>
+    <div id="bsErr" class="errorlist" hidden></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button type="button" class="btn btn-ghost btn-sm" id="bsCancel">Close</button>
+      <button type="button" class="btn btn-sm" id="bsSubmit">Share</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   var form = document.getElementById('filesForm');
@@ -134,6 +227,123 @@
         onConfirm: function(){ var f = document.getElementById('delForm'); f.action = b.dataset.url; f.submit(); }
       });
     });
+  });
+
+  // ---- Bulk share ----
+  var bsModal=document.getElementById('bulkShareModal');
+  var shareBtn=document.getElementById('bulkShareBtn');
+  var csrf=(form.querySelector('[name=csrfmiddlewaretoken]')||{}).value || '';
+  function selectedUuids(){ return boxes.filter(function(b){return b.checked;}).map(function(b){return b.value;}); }
+
+  // people/groups chip picker (same UX as the upload wizard)
+  function bsEsc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function bsInitials(s){ var t=s.replace(/\(.*$/,'').trim().split(/\s+/); return (((t[0]||'')[0]||'')+((t[1]||'')[0]||'')).toUpperCase(); }
+  var bsAll=(function(){
+    var out=[], us=document.getElementById('bsUserSrc'), gs=document.getElementById('bsGroupSrc'), i;
+    if(us) for(i=0;i<us.options.length;i++){ if(us.options[i].value) out.push({type:'user',id:us.options[i].value,label:us.options[i].textContent.trim()}); }
+    if(gs) for(i=0;i<gs.options.length;i++){ if(gs.options[i].value) out.push({type:'group',id:gs.options[i].value,label:gs.options[i].textContent.trim()}); }
+    return out;
+  })();
+  var bsSel=[];
+  var bsSearch=document.getElementById('bsSearch'), bsList=document.getElementById('bsPickList'), bsPicker=document.getElementById('bsPicker');
+  function bsRenderChips(){
+    var box=document.getElementById('bsChips'); box.innerHTML='';
+    bsSel.forEach(function(r){
+      var c=document.createElement('span'); c.className='uw-chip';
+      var ini=r.type==='group'?'#':bsInitials(r.label);
+      c.innerHTML='<span class="uw-cav '+(r.type==='group'?'grp':'')+'">'+bsEsc(ini)+'</span>'+bsEsc(r.label)+' <b>&times;</b>';
+      c.querySelector('b').addEventListener('click',function(){ bsSel.splice(bsSel.indexOf(r),1); bsRenderChips(); if(!bsList.hidden) bsRenderList(); });
+      box.appendChild(c);
+    });
+  }
+  function bsRenderList(){
+    var q=bsSearch.value.trim().toLowerCase(), chosen={};
+    bsSel.forEach(function(r){ chosen[r.type+':'+r.id]=1; });
+    var items=bsAll.filter(function(it){ return !chosen[it.type+':'+it.id] && (!q || it.label.toLowerCase().indexOf(q)!==-1); });
+    if(!items.length){ bsList.innerHTML='<div class="uw-pick-none">'+(q?'No matches':'Everyone added')+'</div>'; bsList.hidden=false; return; }
+    bsList.innerHTML=items.slice(0,50).map(function(it){
+      var ini=it.type==='group'?'#':bsInitials(it.label);
+      return '<button type="button" class="uw-pick-row" data-id="'+bsEsc(it.id)+'" data-type="'+it.type+'" data-label="'+bsEsc(it.label)+'">'+
+        '<span class="uw-pick-av '+(it.type==='group'?'grp':'')+'">'+bsEsc(ini)+'</span>'+
+        '<span class="uw-pick-nm">'+bsEsc(it.label)+'</span><span class="uw-pick-plus">+</span></button>';
+    }).join('');
+    bsList.hidden=false;
+  }
+  if(bsSearch){
+    bsSearch.addEventListener('focus',bsRenderList);
+    bsSearch.addEventListener('input',bsRenderList);
+    bsList.addEventListener('click',function(e){
+      var row=e.target.closest('[data-id]'); if(!row) return;
+      if(!bsSel.some(function(r){return r.type===row.dataset.type && r.id===row.dataset.id;}))
+        bsSel.push({type:row.dataset.type,id:row.dataset.id,label:row.dataset.label});
+      bsSearch.value=''; bsRenderChips(); bsRenderList(); bsSearch.focus();
+    });
+    document.addEventListener('click',function(e){ if(bsPicker && !bsPicker.contains(e.target)) bsList.hidden=true; });
+  }
+
+  function bsOpen(){
+    var n=selectedCount(); if(!n) return;
+    document.getElementById('bsCount').textContent=n+' file'+(n>1?'s':'')+' selected';
+    bsSel=[]; bsRenderChips(); if(bsSearch) bsSearch.value='';
+    document.getElementById('bsNotify').checked=true;
+    ['bsPublic','bsVerify','bsPreview','bsPwdToggle','bsExpToggle','bsLimitToggle'].forEach(function(id){ var el=document.getElementById(id); if(el) el.checked=false; });
+    ['bsPwd','bsExp','bsLimit'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+    bsModal.querySelectorAll('[data-reveal]').forEach(function(r){ r.hidden=true; });
+    var res=document.getElementById('bsResult'); res.hidden=true; res.removeAttribute('data-shared');
+    document.getElementById('bsErr').hidden=true;
+    var sb=document.getElementById('bsSubmit'); sb.disabled=false; sb.textContent='Share';
+    bsModal.hidden=false;
+  }
+  function bsClose(){ bsModal.hidden=true; }
+  if(shareBtn) shareBtn.addEventListener('click', bsOpen);
+  // Per-row "Share" (hover action) → select just that file, then open the modal.
+  document.querySelectorAll('.js-share-one').forEach(function(b){
+    b.addEventListener('click', function(){
+      boxes.forEach(function(x){ x.checked = (x.value === b.dataset.uuid); });
+      update(); bsOpen();
+    });
+  });
+  document.getElementById('bsClose').addEventListener('click', bsClose);
+  document.getElementById('bsCancel').addEventListener('click', function(){ bsClose(); if(document.getElementById('bsResult').dataset.shared) location.reload(); });
+
+  document.getElementById('bsSubmit').addEventListener('click', async function(){
+    var btn=this; var uuids=selectedUuids();
+    var pub=document.getElementById('bsPublic').checked;
+    var verify=pub && document.getElementById('bsVerify').checked;
+    var wantPwd=pub && document.getElementById('bsPwdToggle').checked;
+    var wantExp=pub && document.getElementById('bsExpToggle').checked;
+    var wantLimit=pub && document.getElementById('bsLimitToggle').checked;
+    var userIds=bsSel.filter(function(r){return r.type==='user';}).map(function(r){return r.id;});
+    var groupIds=bsSel.filter(function(r){return r.type==='group';}).map(function(r){return r.id;});
+    var errEl=document.getElementById('bsErr');
+    if(!userIds.length && !groupIds.length && !pub){
+      errEl.textContent='Pick at least one person/group, or enable a public link.'; errEl.hidden=false; return;
+    }
+    errEl.hidden=true;
+    var payload={ uuids:uuids, user_ids:userIds, group_ids:groupIds,
+      notify:document.getElementById('bsNotify').checked, make_public:pub,
+      access:(pub?(verify?'tracked':'public'):'public'),
+      require_verify:verify,
+      preview_only:(pub && document.getElementById('bsPreview').checked),
+      password:(wantPwd?(document.getElementById('bsPwd').value||null):null),
+      expiry_date:(wantExp?(document.getElementById('bsExp').value||null):null),
+      download_limit:(wantLimit?(document.getElementById('bsLimit').value||null):null) };
+    btn.disabled=true; btn.textContent='Sharing…';
+    try{
+      var r=await fetch("{% url 'files:bulk_share' %}",{method:'POST',headers:{'X-CSRFToken':csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      var d=await r.json();
+      btn.disabled=false; btn.textContent='Share';
+      var err=document.getElementById('bsErr');
+      if(!d.ok){ err.textContent=d.error||'Failed to share.'; err.hidden=false; return; }
+      err.hidden=true;
+      var res=document.getElementById('bsResult');
+      res.dataset.shared='1';
+      var html='<div style="color:#0f7a52;font-weight:600;">✓ Shared '+d.files+' file'+(d.files>1?'s':'')+(d.added?(' with '+d.added+' recipient'+(d.added>1?'s':'')):'')+'.</div>';
+      if(d.public_url){ html+='<div class="lnk-urlrow" style="margin-top:8px;"><input type="text" readonly value="'+d.public_url+'" id="bsUrl"><button type="button" class="lnk-mini" id="bsCopy">Copy</button><a class="lnk-mini" href="'+d.public_url+'" target="_blank" rel="noopener">Open</a></div>'; }
+      res.innerHTML=html; res.hidden=false;
+      var cp=document.getElementById('bsCopy');
+      if(cp) cp.addEventListener('click',function(){ var i=document.getElementById('bsUrl'); i.select(); navigator.clipboard.writeText(i.value).then(function(){cp.textContent='Copied ✓';}); });
+    }catch(e){ btn.disabled=false; btn.textContent='Share'; var err=document.getElementById('bsErr'); err.textContent='Error: '+e; err.hidden=false; }
   });
 
   update();

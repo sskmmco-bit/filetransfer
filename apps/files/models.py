@@ -78,6 +78,12 @@ class StoredFile(models.Model):
         "accounts.Group", blank=True, related_name="files"
     )
     is_hidden = models.BooleanField(default=False)
+    # Per-user favourites (Dropbox-style "starred"). Through StarredFile so we can
+    # order by when it was starred; membership is per viewer, not global.
+    starred_by = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through="StarredFile",
+        related_name="starred_files", blank=True,
+    )
     # Admin-defined custom metadata values, keyed by CustomField.key (Phase 5).
     custom_fields = models.JSONField(default=dict, blank=True)
 
@@ -85,6 +91,10 @@ class StoredFile(models.Model):
     is_public = models.BooleanField(default=False)
     public_token = models.CharField(max_length=64, blank=True, db_index=True)
     public_require_email_verify = models.BooleanField(default=False)
+    # Dropbox-style link controls. For a multi-file "bundle" these are stamped
+    # identically on every file sharing the same public_token.
+    public_password_hash = models.CharField(max_length=255, blank=True)  # blank = no password
+    public_allow_download = models.BooleanField(default=True)  # False = preview-only
 
     # Limits / expiry.
     expiry_date = models.DateField(null=True, blank=True)
@@ -131,6 +141,17 @@ class StoredFile(models.Model):
     def download_limit_reached(self) -> bool:
         return bool(self.download_limit is not None and self.download_count >= self.download_limit)
 
+    @property
+    def has_public_password(self) -> bool:
+        return bool(self.public_password_hash)
+
+    @property
+    def public_access_label(self) -> str:
+        """Derived access mode for the link (no separate column)."""
+        if not self.is_public:
+            return "restricted"
+        return "tracked" if self.public_require_email_verify else "public"
+
 
 class UploadSession(models.Model):
     """Tracks an in-progress transfer; maps a chunked upload to MinIO multipart.
@@ -175,6 +196,26 @@ class UploadSession(models.Model):
 
     def next_part_number(self) -> int:
         return len(self.parts) + 1
+
+
+class StarredFile(models.Model):
+    """A user's favourite mark on a file (per-viewer, not global)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="file_stars"
+    )
+    stored_file = models.ForeignKey(
+        StoredFile, on_delete=models.CASCADE, related_name="stars"
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "files_starred_file"
+        unique_together = (("user", "stored_file"),)
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user_id} ★ {self.stored_file_id}"
 
 
 class FileAssignment(models.Model):

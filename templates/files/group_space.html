@@ -22,22 +22,23 @@
 <div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0;">
     <h3 style="margin:0;">Files in this group</h3>
-    {% if files %}{% include "files/_view_toggle.html" %}{% endif %}
+    {% include "files/_view_toggle.html" %}
   </div>
+  <div style="margin-top:12px;">{% include "files/_filter_bar.html" %}</div>
   {% if files %}
   <form method="post" action="{% url 'files:download_zip' %}" style="margin-top:14px;">
     {% csrf_token %}
     {% if view == 'grid' %}
     <div class="file-grid">
-      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True %}{% endfor %}
+      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True %}{% endfor %}{# star inherited #}
     </div>
     {% else %}
     <div class="flist">
-      <div class="flist-head" style="grid-template-columns:1fr 150px 120px;">
-        <span>Name</span><span class="h-date">Added</span><span style="text-align:right;">Actions</span>
+      <div class="flist-head" style="grid-template-columns:1fr 150px;">
+        <span>Name</span><span class="h-date">Added</span>
       </div>
       {% for f in files %}
-      <div class="frow" style="grid-template-columns:1fr 150px 120px;">
+      <div class="frow" style="grid-template-columns:1fr 150px;">
         <div class="fmain">
           <input type="checkbox" name="uuids" value="{{ f.uuid }}" class="fcheck" title="Select">
           <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
@@ -45,16 +46,17 @@
             <a class="fname" href="{% url 'files:detail' uuid=f.uuid %}">{{ f.display_name }}</a>
             <div class="fsub">Added by {{ f.owner.get_full_name|default:f.owner.username }} · {{ f.size|filesizeformat }}</div>
           </div>
+          <div class="factions">
+            {% include "files/_star_btn.html" %}
+            {% if f|previewable %}
+            <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
+              <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
+            {% endif %}
+            <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
+          </div>
         </div>
         <div class="fdate">{{ f.created_at|date:"M j, Y" }}</div>
-        <div class="factions">
-          {% if f|previewable %}
-          <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
-            <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
-          {% endif %}
-          <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
-            <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
-        </div>
       </div>
       {% endfor %}
     </div>

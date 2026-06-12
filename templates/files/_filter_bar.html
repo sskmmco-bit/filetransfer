@@ -1,0 +1,10 @@
+{% comment %}File-type filter chips. Expects `current_type` (''|'doc'|'img'|'vid'|'zip'|'code'|'other')
+and `view` in context. Each chip preserves the current view mode.{% endcomment %}
+{% load file_extras %}
+{% file_type_filters as type_filters %}
+<div class="filterbar" role="group" aria-label="Filter by type">
+  {% for key, label in type_filters %}
+  <a class="fchip {% if current_type == key %}on{% endif %}"
+     href="?{% if key %}type={{ key }}&{% endif %}view={{ view }}">{{ label }}</a>
+  {% endfor %}
+</div>

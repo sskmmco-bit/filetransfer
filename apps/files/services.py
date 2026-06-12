@@ -265,6 +265,51 @@ def ensure_public_token(stored_file: StoredFile, *, rotate: bool = False) -> str
 
 
 def disable_public_link(stored_file: StoredFile) -> None:
-    stored_file.is_public = False
-    stored_file.public_token = ""
-    stored_file.save(update_fields=["public_token", "is_public", "updated_at"])
+    """Turn off the public link and clear all link controls (bundle-wide)."""
+    token = stored_file.public_token
+    qs = (StoredFile.objects.filter(public_token=token) if token
+          else StoredFile.objects.filter(pk=stored_file.pk))
+    qs.update(
+        is_public=False, public_token="", public_require_email_verify=False,
+        public_password_hash="", public_allow_download=True, updated_at=timezone.now(),
+    )
+
+
+def configure_public_link(files, *, access="public", require_verify=False, password=None,
+                          allow_download=True, expiry_date=None, download_limit=None,
+                          rotate=False) -> str:
+    """Create/update a public link across a set of files sharing one token.
+
+    `access`: 'public' | 'tracked' (email-verify) | 'restricted' (no anon link).
+    `password`: None leaves the existing password untouched; "" clears it; any
+    other value is hashed. Returns the shared token ("" for restricted/disabled).
+    """
+    from django.contrib.auth.hashers import make_password
+
+    files = list(files)
+    if not files:
+        return ""
+    if access == "restricted":
+        for f in files:
+            disable_public_link(f)
+        return ""
+
+    # Reuse an existing shared token (any file in the set) unless rotating.
+    token = next((f.public_token for f in files if f.public_token), "")
+    if rotate or not token:
+        token = secrets.token_urlsafe(32)
+
+    fields = {
+        "is_public": True,
+        "public_token": token,
+        "public_require_email_verify": bool(require_verify) or access == "tracked",
+        "public_allow_download": bool(allow_download),
+        "expiry_date": expiry_date,
+        "download_limit": download_limit,
+        "updated_at": timezone.now(),
+    }
+    if password is not None:
+        fields["public_password_hash"] = make_password(password) if password else ""
+
+    StoredFile.objects.filter(pk__in=[f.pk for f in files]).update(**fields)
+    return token
