@@ -1,0 +1,207 @@
+{% comment %}Redesigned Role create/edit form: two columns (details | permissions),
+grouped permission cards with friendly labels + codename, search, quick presets,
+live count, sticky footer. Rendered inside the console modal.{% endcomment %}
+<style>
+  #cmodal .cmodal-card{max-width:960px;padding:0;max-height:88vh;
+    display:flex;flex-direction:column;overflow:hidden;}
+  #cmodal #cmodal-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+
+  .rf{flex:1;min-height:0;display:flex;flex-direction:column;}
+  .rf-head{padding:20px 26px 16px;border-bottom:1px solid var(--line);}
+  .rf-head h2{margin:0;font-size:19px;font-weight:700;}
+  .rf-head .rf-sub{color:var(--muted);font-size:13px;margin-top:2px;}
+  .rf-body{flex:1;min-height:0;overflow-y:auto;padding:22px 26px;}
+  .rf-foot{border-top:1px solid var(--line);padding:14px 26px;background:#fff;
+    display:flex;justify-content:flex-end;gap:10px;}
+  .rf-err{background:var(--red-bg);color:#b42318;border:1px solid #f3c9c4;
+    border-radius:10px;padding:10px 13px;font-size:13px;margin-bottom:16px;}
+
+  .rf-cols{display:grid;grid-template-columns:290px 1fr;gap:26px;align-items:start;}
+  @media(max-width:760px){.rf-cols{grid-template-columns:1fr;}}
+
+  .rf-sec-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--accent2);margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);}
+  .rf-field{margin-bottom:16px;}
+  .rf-field label{display:block;font-size:13px;font-weight:600;color:#3c4a38;margin:0 0 6px;}
+  .rf-field .req{color:var(--red);margin-left:2px;}
+  .rf-field .opt{color:var(--muted);font-weight:400;}
+  .rf input[type=text],.rf input:not([type]),.rf textarea{width:100%;padding:11px 13px;
+    border:1px solid #d4ddca;border-radius:10px;font-size:14px;background:#fff;color:var(--ink);}
+  .rf input:focus,.rf textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .rf .errorlist{color:var(--red);font-size:12px;margin-top:5px;list-style:none;padding:0;}
+
+  .pm-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:4px;}
+  .pm-top .rf-sec-h{border:0;margin:0;padding:0;}
+  .pm-count{font-size:12px;font-weight:600;color:var(--accent2);background:var(--accent-soft);
+    border-radius:999px;padding:3px 10px;white-space:nowrap;}
+
+  .pm-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 8px;}
+  .pm-presets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
+  .pm-preset{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 13px;
+    font-size:13px;cursor:pointer;color:var(--ink);font-weight:500;}
+  .pm-preset:hover{border-color:var(--accent);}
+  .pm-preset.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent2);font-weight:600;}
+
+  .pm-searchwrap{position:relative;margin:14px 0 6px;}
+  .pm-searchwrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--muted);}
+  .pm-search{width:100%;padding:10px 12px 10px 35px !important;border:1px solid #d4ddca;border-radius:10px;font-size:14px;}
+
+  .pm-group{border:1px solid var(--line);border-radius:12px;margin-top:12px;overflow:hidden;}
+  .pm-group > summary{list-style:none;cursor:pointer;padding:11px 14px;font-size:13px;font-weight:700;
+    color:var(--ink);background:#f7faf4;display:flex;align-items:center;justify-content:space-between;}
+  .pm-group > summary::-webkit-details-marker{display:none;}
+  .pm-group > summary .chev{transition:transform .18s;color:var(--muted);}
+  .pm-group[open] > summary .chev{transform:rotate(180deg);}
+  .pm-list{padding:6px;}
+  .pm-row{display:flex;align-items:flex-start;gap:11px;padding:9px 10px;border-radius:9px;cursor:pointer;}
+  .pm-row:hover{background:var(--accent-soft);}
+  .pm-row input{margin:2px 0 0;width:16px;height:16px;flex:none;accent-color:var(--accent);}
+  .pm-meta{line-height:1.25;min-width:0;}
+  .pm-name{font-weight:600;font-size:13.5px;color:var(--ink);}
+  .pm-code{color:var(--muted);font-size:11.5px;font-family:ui-monospace,Menlo,Consolas,monospace;}
+  .pm-noresult{color:var(--muted);font-size:13px;text-align:center;padding:16px;}
+</style>
+
+<form class="rf" method="post" data-cform
+      action="{% if form.instance.pk %}{% url 'core:manage_edit' key=resource.key pk=form.instance.pk %}{% else %}{% url 'core:manage_new' key=resource.key %}{% endif %}">
+  {% csrf_token %}
+
+  <div class="rf-head">
+    <h2>{% if form.instance.pk %}Edit Role{% else %}Create Role{% endif %}</h2>
+    <div class="rf-sub">Define a role and the permissions it grants.</div>
+  </div>
+
+  <div class="rf-body">
+    {% if form.non_field_errors %}<div class="rf-err">{{ form.non_field_errors }}</div>{% endif %}
+
+    <div class="rf-cols rf-root">
+      {# ---------- left: details ---------- #}
+      <div>
+        <h3 class="rf-sec-h">Role Information</h3>
+        <div class="rf-field">
+          <label for="{{ form.name.id_for_label }}">Role Name{% if form.name.field.required %}<span class="req">*</span>{% endif %}</label>
+          {{ form.name }}
+          {% for e in form.name.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="rf-field">
+          <label for="{{ form.description.id_for_label }}">Description <span class="opt">(optional)</span></label>
+          {{ form.description }}
+          {% for e in form.description.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+        </div>
+
+        <div class="pm-label">Quick Preset</div>
+        <div class="pm-presets">
+          <button type="button" class="pm-preset" data-preset="viewer">Viewer</button>
+          <button type="button" class="pm-preset" data-preset="uploader">Uploader</button>
+          <button type="button" class="pm-preset" data-preset="manager">Manager</button>
+          <button type="button" class="pm-preset" data-preset="administrator">Administrator</button>
+          <button type="button" class="pm-preset on" data-preset="custom">Custom</button>
+        </div>
+      </div>
+
+      {# ---------- right: permissions ---------- #}
+      <div>
+        <div class="pm-top">
+          <h3 class="rf-sec-h">Permissions</h3>
+          <span class="pm-count">0 of {{ permission_total }} selected</span>
+        </div>
+
+        <div class="pm-searchwrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          <input type="text" class="pm-search" placeholder="Search permissions…" autocomplete="off">
+        </div>
+
+        {% for g in permission_groups %}
+        <details class="pm-group" open>
+          <summary>
+            {{ g.category }}
+            <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </summary>
+          <div class="pm-list">
+            {% for it in g.items %}
+            <label class="pm-row" data-search="{{ it.label|lower }} {{ it.codename|lower }}">
+              <input type="checkbox" name="permissions" value="{{ it.id }}" data-code="{{ it.codename }}"{% if it.selected %} checked{% endif %}>
+              <span class="pm-meta">
+                <span class="pm-name">{{ it.label }}</span><br>
+                <span class="pm-code">{{ it.codename }}</span>
+              </span>
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+        {% endfor %}
+        <div class="pm-noresult" hidden>No permissions match your search.</div>
+        {% for e in form.permissions.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="rf-foot">
+    <a data-cancel href="{% url 'core:manage_list' key=resource.key %}" class="btn btn-ghost btn-sm">Cancel</a>
+    <button type="submit" class="btn btn-sm">{% if form.instance.pk %}Save Changes{% else %}Create Role{% endif %}</button>
+  </div>
+</form>
+
+<script>
+(function(){
+  var root = document.querySelector('#cmodal-body .rf-root');
+  if (!root) return;
+  var boxes   = Array.prototype.slice.call(root.querySelectorAll('input[name=permissions]'));
+  var countEl = root.querySelector('.pm-count');
+  var search  = root.querySelector('.pm-search');
+  var noRes   = root.querySelector('.pm-noresult');
+  var presets = Array.prototype.slice.call(root.querySelectorAll('[data-preset]'));
+  var total   = boxes.length;
+
+  // Preset codename sets. "administrator" = everything; "custom" = leave as-is.
+  var PRESETS = {
+    viewer:   ['files.view_all','files.download','audit.view'],
+    uploader: ['files.upload','files.download','files.upload_public'],
+    manager:  ['files.upload','files.download','files.delete','files.upload_public',
+               'files.view_all','categories.manage','groups.manage','users.manage']
+  };
+
+  function updateCount(){
+    var n = boxes.filter(function(b){return b.checked;}).length;
+    countEl.textContent = n + ' of ' + total + ' selected';
+  }
+  function markPreset(name){
+    presets.forEach(function(b){ b.classList.toggle('on', b.dataset.preset === name); });
+  }
+  function applyPreset(name){
+    if (name === 'custom') return;
+    var all = name === 'administrator';
+    var set = PRESETS[name] || [];
+    boxes.forEach(function(b){ b.checked = all || set.indexOf(b.dataset.code) !== -1; });
+    updateCount();
+  }
+
+  presets.forEach(function(btn){
+    btn.addEventListener('click', function(){ markPreset(btn.dataset.preset); applyPreset(btn.dataset.preset); });
+  });
+
+  // Manual toggle => fall back to "Custom".
+  root.addEventListener('change', function(e){
+    if (e.target.name === 'permissions'){ markPreset('custom'); updateCount(); }
+  });
+
+  function filter(){
+    var q = search.value.trim().toLowerCase();
+    var anyTotal = false;
+    root.querySelectorAll('.pm-group').forEach(function(g){
+      var any = false;
+      g.querySelectorAll('.pm-row').forEach(function(r){
+        var show = !q || r.dataset.search.indexOf(q) !== -1;
+        r.style.display = show ? '' : 'none';
+        if (show) any = true;
+      });
+      g.style.display = any ? '' : 'none';
+      if (any) anyTotal = true;
+    });
+    noRes.hidden = anyTotal;
+  }
+  search.addEventListener('input', filter);
+
+  updateCount();
+})();
+</script>

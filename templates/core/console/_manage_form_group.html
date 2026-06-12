@@ -1,0 +1,191 @@
+{% comment %}Redesigned Group create/edit form with a searchable member picker
+(chips + avatars + add-list + empty state). Rendered inside the console modal.
+Inline CSS + JS apply because _modal.html re-executes fragment scripts.{% endcomment %}
+<style>
+  #cmodal .cmodal-card{max-width:720px;padding:0;max-height:88vh;
+    display:flex;flex-direction:column;overflow:hidden;}
+  #cmodal #cmodal-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+
+  .gf{flex:1;min-height:0;display:flex;flex-direction:column;}
+  .gf-head{padding:20px 26px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;}
+  .gf-head .gf-ic{width:38px;height:38px;border-radius:11px;background:var(--accent-soft);color:var(--accent2);
+    display:flex;align-items:center;justify-content:center;flex:none;}
+  .gf-head h2{margin:0;font-size:19px;font-weight:700;}
+  .gf-head .gf-sub{color:var(--muted);font-size:13px;margin-top:2px;}
+  .gf-body{flex:1;min-height:0;overflow-y:auto;padding:20px 26px;}
+  .gf-foot{border-top:1px solid var(--line);padding:14px 26px;background:#fff;
+    display:flex;justify-content:flex-end;gap:10px;}
+  .gf-err{background:var(--red-bg);color:#b42318;border:1px solid #f3c9c4;
+    border-radius:10px;padding:10px 13px;font-size:13px;margin-bottom:16px;}
+
+  .gf-field{margin-bottom:18px;}
+  .gf-field label{display:block;font-size:13px;font-weight:600;color:#3c4a38;margin:0 0 6px;}
+  .gf-field .req{color:var(--red);margin-left:2px;}
+  .gf-field .opt{color:var(--muted);font-weight:400;}
+  .gf input[type=text],.gf input:not([type]),.gf textarea{width:100%;padding:11px 13px;
+    border:1px solid #d4ddca;border-radius:10px;font-size:14px;background:#fff;color:var(--ink);}
+  .gf input:focus,.gf textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .gf .errorlist{color:var(--red);font-size:12px;margin-top:5px;list-style:none;padding:0;}
+
+  /* members label — most prominent */
+  .gm-h{font-size:14px;font-weight:700;color:var(--ink);margin:0 0 4px;}
+  .gm-h .gm-count{color:var(--accent2);font-weight:600;}
+  .gm-help{color:var(--muted);font-size:12px;margin:0 0 10px;}
+
+  /* avatar */
+  .gm-av{width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;
+    justify-content:center;font-size:11px;font-weight:700;color:#fff;
+    background:linear-gradient(135deg,var(--accent),#9ccb7e);}
+
+  /* search */
+  .gm-searchwrap{position:relative;margin-bottom:12px;}
+  .gm-searchwrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);
+    width:17px;height:17px;color:var(--muted);pointer-events:none;}
+  .gm-search{width:100%;padding:11px 13px 11px 36px !important;border:1px solid #d4ddca;
+    border-radius:10px;font-size:14px;}
+
+  /* selected chips */
+  .gm-selected{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;}
+  .gm-chip{display:inline-flex;align-items:center;gap:8px;background:var(--accent-soft);
+    border:1px solid #d3e6c5;border-radius:999px;padding:4px 6px 4px 5px;font-size:13px;font-weight:500;color:var(--ink);}
+  .gm-chip .gm-av{width:22px;height:22px;font-size:10px;}
+  .gm-chip .gm-x{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:16px;
+    line-height:1;padding:0 4px;border-radius:50%;}
+  .gm-chip .gm-x:hover{color:var(--red);}
+
+  /* empty state */
+  .gm-empty{border:1.5px dashed #cdd9c1;border-radius:12px;padding:20px;text-align:center;margin-bottom:14px;}
+  .gm-empty b{display:block;color:var(--ink);font-size:14px;}
+  .gm-empty span{color:var(--muted);font-size:12px;}
+
+  /* available list */
+  .gm-avail-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin:0 0 8px;}
+  .gm-avail{max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:6px;}
+  .gm-row{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;background:transparent;
+    border-radius:9px;cursor:pointer;text-align:left;font-size:14px;color:var(--ink);}
+  .gm-row:hover{background:var(--accent-soft);}
+  .gm-rm-meta{flex:1;min-width:0;line-height:1.2;}
+  .gm-rn{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .gm-ru{color:var(--muted);font-size:12px;}
+  .gm-plus{color:var(--accent2);font-weight:700;font-size:18px;}
+  .gm-none{color:var(--muted);font-size:13px;text-align:center;padding:16px;}
+</style>
+
+<form class="gf" method="post" data-cform
+      action="{% if form.instance.pk %}{% url 'core:manage_edit' key=resource.key pk=form.instance.pk %}{% else %}{% url 'core:manage_new' key=resource.key %}{% endif %}">
+  {% csrf_token %}
+
+  <div class="gf-head">
+    <span class="gf-ic">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M15 19c0-2 1-3.4 3-3.4s3 1.4 3 3.4"/></svg>
+    </span>
+    <div>
+      <h2>{% if form.instance.pk %}Edit Group{% else %}Create Group{% endif %}</h2>
+      <div class="gf-sub">{% if form.instance.pk %}Update the group and its members.{% else %}Name the group and add members.{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="gf-body">
+    {% if form.non_field_errors %}<div class="gf-err">{{ form.non_field_errors }}</div>{% endif %}
+
+    <div class="gf-field">
+      <label for="{{ form.name.id_for_label }}">Group Name{% if form.name.field.required %}<span class="req">*</span>{% endif %}</label>
+      {{ form.name }}
+      {% for e in form.name.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+    </div>
+
+    <div class="gf-field">
+      <label for="{{ form.description.id_for_label }}">Description <span class="opt">(optional)</span></label>
+      {{ form.description }}
+      {% for e in form.description.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+    </div>
+
+    <div class="gm-root">
+      <div class="gm-h">Members <span class="gm-count"></span></div>
+      <p class="gm-help">Search and add users to this group.</p>
+
+      <div class="gm-searchwrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input type="text" class="gm-search" placeholder="Search users…" autocomplete="off">
+      </div>
+
+      <div class="gm-selected"></div>
+
+      <div class="gm-avail-label">Available users</div>
+      <div class="gm-avail"></div>
+
+      {# JS injects the real name="members" hidden inputs here #}
+      <div class="gm-inputs"></div>
+      {% for e in form.members.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="gf-foot">
+    <a data-cancel href="{% url 'core:manage_list' key=resource.key %}" class="btn btn-ghost btn-sm">Cancel</a>
+    <button type="submit" class="btn btn-sm">{% if form.instance.pk %}Save Changes{% else %}Create Group{% endif %}</button>
+  </div>
+</form>
+
+{{ member_choices|json_script:"gm-data" }}
+<script>
+(function(){
+  var root = document.querySelector('#cmodal-body .gm-root');
+  var dataEl = document.getElementById('gm-data');
+  if (!root || !dataEl) return;
+  var data = JSON.parse(dataEl.textContent || '[]');
+  var selected = new Set(data.filter(function(u){return u.selected;}).map(function(u){return String(u.id);}));
+
+  var search  = root.querySelector('.gm-search');
+  var selBox  = root.querySelector('.gm-selected');
+  var availBox= root.querySelector('.gm-avail');
+  var inputs  = root.querySelector('.gm-inputs');
+  var countEl = root.querySelector('.gm-count');
+
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function byId(id){return data.find(function(u){return String(u.id)===String(id);});}
+
+  function render(){
+    var sel = Array.from(selected);
+    countEl.textContent = sel.length ? '· ' + sel.length + ' selected' : '';
+
+    if (sel.length === 0){
+      selBox.innerHTML = '<div class="gm-empty"><b>No members selected</b><span>Search and add users below.</span></div>';
+    } else {
+      selBox.innerHTML = sel.map(function(id){
+        var u = byId(id); if(!u) return '';
+        return '<span class="gm-chip"><span class="gm-av">'+esc(u.initials)+'</span>'+esc(u.name)+
+               '<button type="button" class="gm-x" data-rm="'+u.id+'" aria-label="Remove">&times;</button></span>';
+      }).join('');
+    }
+
+    inputs.innerHTML = sel.map(function(id){return '<input type="hidden" name="members" value="'+esc(id)+'">';}).join('');
+
+    var q = search.value.trim().toLowerCase();
+    var avail = data.filter(function(u){
+      return !selected.has(String(u.id)) &&
+        (!q || u.name.toLowerCase().indexOf(q) !== -1 || u.username.toLowerCase().indexOf(q) !== -1);
+    });
+    if (avail.length === 0){
+      availBox.innerHTML = '<div class="gm-none">'+(q ? 'No users found' : 'All users added')+'</div>';
+    } else {
+      availBox.innerHTML = avail.map(function(u){
+        return '<button type="button" class="gm-row" data-add="'+u.id+'">'+
+          '<span class="gm-av">'+esc(u.initials)+'</span>'+
+          '<span class="gm-rm-meta"><span class="gm-rn">'+esc(u.name)+'</span>'+
+          '<span class="gm-ru">@'+esc(u.username)+'</span></span>'+
+          '<span class="gm-plus">+</span></button>';
+      }).join('');
+    }
+  }
+
+  root.addEventListener('click', function(e){
+    var add = e.target.closest('[data-add]');
+    if (add){ selected.add(String(add.dataset.add)); search.value=''; render(); search.focus(); return; }
+    var rm = e.target.closest('[data-rm]');
+    if (rm){ selected.delete(String(rm.dataset.rm)); render(); }
+  });
+  search.addEventListener('input', render);
+  render();
+})();
+</script>

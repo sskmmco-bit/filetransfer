@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
-from django.http import HttpResponseRedirect, JsonResponse
+from django.http import Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -49,9 +50,18 @@ PAGE_SIZE = 20
 
 
 def _paginate(request, queryset, per_page: int = PAGE_SIZE):
-    """Return the requested page of a queryset (clamps out-of-range ?page=)."""
+    """Return the requested page of a queryset (clamps out-of-range ?page=).
+
+    The page size adapts to the viewport: the client measures how many rows/cards
+    fit and sends it via ?per_page= or the `files_pp` cookie (clamped 8..200).
+    """
     from django.core.paginator import Paginator
 
+    raw = request.GET.get("per_page") or request.COOKIES.get("files_pp")
+    try:
+        per_page = max(8, min(int(raw), 200))
+    except (TypeError, ValueError):
+        pass
     paginator = Paginator(queryset, per_page)
     return paginator.get_page(request.GET.get("page"))
 
@@ -154,14 +164,107 @@ def upload_chunk(request):
     if chunk is None:
         return JsonResponse({"error": "missing chunk"}, status=400)
 
-    part_number = session.next_part_number()
+    expected = session.next_part_number()
+    # Resume safety: if the client re-sends a part we already stored (e.g. after
+    # a reconnect), acknowledge it without uploading a duplicate.
+    client_pn = request.POST.get("part_number")
+    if client_pn is not None and int(client_pn) < expected:
+        return JsonResponse(
+            {"part_number": int(client_pn), "received": session.received_size, "duplicate": True}
+        )
+
     etag = storage.upload_part(
-        session.stored_file.temp_key, session.multipart_upload_id, part_number, chunk.read()
+        session.stored_file.temp_key, session.multipart_upload_id, expected, chunk.read()
     )
-    session.parts.append({"PartNumber": part_number, "ETag": etag})
+    session.parts.append({"PartNumber": expected, "ETag": etag})
     session.received_size += chunk.size
     session.save(update_fields=["parts", "received_size"])
-    return JsonResponse({"part_number": part_number, "received": session.received_size})
+    return JsonResponse({"part_number": expected, "received": session.received_size})
+
+
+@login_required
+@require_GET
+def upload_status(request):
+    """Report progress of an in-flight chunked upload so the client can resume
+    from where it stopped (after a cancel, reconnect, or page reload)."""
+    _require(request, "files.upload")
+    session = (
+        UploadSession.objects.filter(token=request.GET.get("token"), owner=request.user)
+        .select_related("stored_file")
+        .first()
+    )
+    if (
+        not session
+        or session.is_expired
+        or not session.is_chunked
+        or session.stored_file.status != FileStatus.UPLOADING
+    ):
+        return JsonResponse({"resumable": False})
+    return JsonResponse({
+        "resumable": True,
+        "token": str(session.token),
+        "received": session.received_size,
+        "next_part": session.next_part_number(),
+        "part_size": CHUNK_PART_SIZE,
+        "declared_size": session.declared_size,
+    })
+
+
+@login_required
+@require_GET
+def incomplete_uploads(request):
+    """List the user's resumable (interrupted) chunked uploads with progress.
+
+    The browser can't re-open a local file on its own, so the UI lists these and
+    asks the user to re-pick the matching file; the transfer then continues from
+    `received` using the existing token.
+    """
+    _require(request, "files.upload")
+    sessions = (
+        UploadSession.objects.filter(
+            owner=request.user,
+            is_chunked=True,
+            stored_file__status=FileStatus.UPLOADING,
+            expires_at__gt=timezone.now(),
+        )
+        .select_related("stored_file")
+        .order_by("-created_at")
+    )
+    items = [
+        {
+            "token": str(s.token),
+            "filename": s.stored_file.original_filename,
+            "declared_size": s.declared_size,
+            "received": s.received_size,
+            "next_part": s.next_part_number(),
+            "part_size": CHUNK_PART_SIZE,
+        }
+        for s in sessions
+        if s.received_size > 0  # only sessions with real progress are worth resuming
+    ][:20]
+    return JsonResponse({"items": items})
+
+
+@login_required
+@require_POST
+def upload_cancel(request):
+    """Abort an in-flight upload and clean up its multipart + temp object."""
+    _require(request, "files.upload")
+    data = json.loads(request.body or "{}")
+    session = (
+        UploadSession.objects.filter(token=data.get("token"), owner=request.user)
+        .select_related("stored_file")
+        .first()
+    )
+    if session:
+        sf = session.stored_file
+        if session.is_chunked and session.multipart_upload_id:
+            storage.abort_multipart(sf.temp_key, session.multipart_upload_id)
+        storage.delete_object(sf.temp_key)
+        session.delete()
+        if sf.status == FileStatus.UPLOADING:  # never activated — drop the row
+            sf.delete()
+    return JsonResponse({"ok": True})
 
 
 def _resolve_recipients(tokens):
@@ -304,6 +407,8 @@ def edit(request, uuid):
     sf = get_object_or_404(StoredFile, uuid=uuid, owner=request.user)
     if sf.status not in (FileStatus.PENDING_METADATA, FileStatus.ACTIVE):
         raise PermissionDenied("File is not ready for metadata.")
+    ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
+    detail_url = reverse("files:detail", kwargs={"uuid": sf.uuid})
 
     if request.method == "POST":
         form = MetadataForm(request.POST, instance=sf)
@@ -326,22 +431,46 @@ def edit(request, uuid):
                 recipient_ids=recipient_ids,
                 assigned_by=request.user,
             )
+            if ajax:
+                return JsonResponse({"ok": True, "redirect": detail_url})
             return redirect("files:detail", uuid=sf.uuid)
+        if ajax:
+            return render(request, "files/_edit_form.html", {"form": form, "file": sf}, status=422)
     else:
         form = MetadataForm(instance=sf, initial={"title": sf.title or sf.original_filename})
-    return render(request, "files/edit.html", {"form": form, "file": sf})
+
+    template = "files/_edit_form.html" if ajax else "files/edit.html"
+    return render(request, template, {"form": form, "file": sf})
 
 
 # ---------------------------------------------------------------------------
 # Lists + detail + download
 # ---------------------------------------------------------------------------
+def _view_mode(request):
+    """List vs grid view preference: ?view= wins, else cookie, else 'list'."""
+    v = request.GET.get("view")
+    if v not in ("list", "grid"):
+        v = request.COOKIES.get("files_view", "list")
+    return v if v in ("list", "grid") else "list"
+
+
+def _remember_view(request, response):
+    """Persist an explicit ?view= choice in a cookie for next time."""
+    v = request.GET.get("view")
+    if v in ("list", "grid"):
+        response.set_cookie("files_view", v, max_age=60 * 60 * 24 * 365, samesite="Lax")
+    return response
+
+
 @login_required
 def my_uploads(request):
     from django.db.models import Count
 
+    # Hide in-flight/abandoned transfers (UPLOADING) and deleted rows — only
+    # real, finished files (PENDING_METADATA drafts + ACTIVE) belong in My Files.
     qs = (
         StoredFile.objects.filter(owner=request.user)
-        .exclude(status=FileStatus.DELETED)
+        .exclude(status__in=[FileStatus.DELETED, FileStatus.UPLOADING])
         .prefetch_related("categories")
         .annotate(
             n_assign=Count("assignments", distinct=True),
@@ -350,7 +479,9 @@ def my_uploads(request):
         .order_by("-created_at")
     )
     page = _paginate(request, qs)
-    return render(request, "files/my_uploads.html", {"files": page, "page": page})
+    resp = render(request, "files/my_uploads.html",
+                  {"files": page, "page": page, "view": _view_mode(request)})
+    return _remember_view(request, resp)
 
 
 @login_required
@@ -362,7 +493,9 @@ def my_files(request):
         .select_related("stored_file", "assigned_by")
     )
     page = _paginate(request, qs)
-    return render(request, "files/my_files.html", {"assignments": page, "page": page})
+    resp = render(request, "files/my_files.html",
+                  {"assignments": page, "page": page, "view": _view_mode(request)})
+    return _remember_view(request, resp)
 
 
 @login_required
@@ -386,10 +519,12 @@ def group_space(request, pk):
     )
     page = _paginate(request, files_qs)
     members = group.members.order_by("first_name", "username")
-    return render(request, "files/group_space.html", {
+    resp = render(request, "files/group_space.html", {
         "group": group, "files": page, "page": page, "members": members,
         "is_member": is_member, "file_count": files_qs.count(),
+        "view": _view_mode(request),
     })
+    return _remember_view(request, resp)
 
 
 def preview_kind(content_type: str, filename: str) -> str:
@@ -422,10 +557,42 @@ def detail(request, uuid):
             sf.storage_key, download_name=sf.original_filename,
             inline=True, content_type=sf.content_type,
         )
-    return render(request, "files/detail.html", {
-        "file": sf, "is_owner": is_owner,
-        "preview_kind": kind, "preview_url": preview_url,
-    })
+
+    ctx = {"file": sf, "is_owner": is_owner,
+           "preview_kind": kind, "preview_url": preview_url}
+    if is_owner and sf.is_active:
+        ctx.update(_share_context(sf, request.user))
+    return render(request, "files/detail.html", ctx)
+
+
+def _initials(name, fallback=""):
+    parts = (name or "").split()
+    ini = (parts[0][:1] + (parts[1][:1] if len(parts) > 1 else "")) if parts else ""
+    return (ini or fallback[:2]).upper()
+
+
+def _share_context(sf, owner):
+    """Picker data + current recipients/groups for the detail-page share modal."""
+    from django.contrib.auth import get_user_model
+
+    from apps.accounts.models import Group
+
+    User = get_user_model()
+    shared_user_ids = set(sf.assignments.values_list("recipient_id", flat=True))
+    shared_group_ids = set(sf.groups.values_list("pk", flat=True))
+
+    users = [{"id": u.pk, "name": (u.get_full_name() or u.username), "username": u.username,
+              "initials": _initials(u.get_full_name() or u.username, u.username),
+              "shared": u.pk in shared_user_ids}
+             for u in User.objects.filter(is_active=True).exclude(pk=owner.pk).order_by("username")]
+    groups = [{"id": g.pk, "name": g.name, "initials": _initials(g.name),
+               "shared": g.pk in shared_group_ids}
+              for g in Group.objects.order_by("name")]
+
+    shared_users = [u for u in users if u["shared"]]
+    shared_groups = [g for g in groups if g["shared"]]
+    return {"share_users": users, "share_groups": groups,
+            "shared_users": shared_users, "shared_groups": shared_groups}
 
 
 @login_required
@@ -440,6 +607,30 @@ def preview(request, uuid):
         inline=True, content_type=sf.content_type,
     )
     return HttpResponseRedirect(url)
+
+
+@login_required
+@require_GET
+def thumb(request, uuid):
+    """Serve a grid-view thumbnail for a file (images only); 404 otherwise.
+
+    Uses the generated JPEG thumbnail when present, else falls back to the
+    original image inline (the browser downscales it). Non-images have no
+    thumbnail — the grid shows a type icon instead.
+    """
+    sf = get_object_or_404(StoredFile, uuid=uuid)
+    if sf.status != FileStatus.ACTIVE or not _can_access(sf, request.user):
+        raise Http404("No thumbnail.")
+    if sf.thumbnail_key:
+        return HttpResponseRedirect(storage.presigned_get_url(
+            sf.thumbnail_key, download_name="thumb.jpg", inline=True, content_type="image/jpeg"
+        ))
+    if preview_kind(sf.content_type, sf.original_filename) == "image":
+        return HttpResponseRedirect(storage.presigned_get_url(
+            sf.storage_key, download_name=sf.original_filename,
+            inline=True, content_type=sf.content_type,
+        ))
+    raise Http404("No thumbnail.")
 
 
 def _can_access(sf, user) -> bool:
@@ -497,6 +688,57 @@ def delete(request, uuid):
     if sf.status == FileStatus.DELETED:
         raise PermissionDenied("File is already deleted.")
     services.soft_delete_stored_file(sf.pk, reason="manual delete", actor=request.user)
+    return redirect("files:my_uploads")
+
+
+@login_required
+@require_POST
+def share(request, uuid):
+    """Share an active file with more users/groups from the detail page (§5.8)."""
+    from apps.accounts.models import Group
+
+    sf = get_object_or_404(StoredFile, uuid=uuid, owner=request.user)
+    if sf.status != FileStatus.ACTIVE:
+        return JsonResponse({"error": "Only active files can be shared."}, status=400)
+
+    data = json.loads(request.body or "{}")
+    try:
+        user_ids = {int(x) for x in data.get("user_ids", [])}
+        group_ids = {int(x) for x in data.get("group_ids", [])}
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Invalid selection."}, status=400)
+
+    groups = list(Group.objects.filter(pk__in=group_ids))
+    recipient_ids = set(user_ids)
+    for g in groups:  # expand group members into individual recipients
+        recipient_ids.update(g.members.values_list("pk", flat=True))
+    recipient_ids.discard(request.user.pk)  # never assign the owner to their own file
+
+    if not recipient_ids and not groups:
+        return JsonResponse({"error": "Select at least one person or group."}, status=400)
+
+    added = services.add_recipients(
+        sf.pk, recipient_ids=recipient_ids, groups=groups,
+        assigned_by=request.user, notify=bool(data.get("notify", True)),
+    )
+    return JsonResponse({"ok": True, "added": added})
+
+
+@login_required
+@require_POST
+def bulk_delete(request):
+    """Owner soft-deletes several of their files at once (§5.6.2)."""
+    uuids = request.POST.getlist("uuids")
+    qs = (StoredFile.objects.filter(uuid__in=uuids, owner=request.user)
+          .exclude(status=FileStatus.DELETED))
+    count = 0
+    for sf in qs:
+        services.soft_delete_stored_file(sf.pk, reason="manual delete (bulk)", actor=request.user)
+        count += 1
+    if count:
+        messages.success(request, f"{count} file{'' if count == 1 else 's'} deleted.")
+    else:
+        messages.warning(request, "No files were deleted.")
     return redirect("files:my_uploads")
 
 

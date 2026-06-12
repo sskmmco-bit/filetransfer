@@ -31,12 +31,10 @@ MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024  # 5 GiB
 MIN_PART_SIZE = 5 * 1024 * 1024
 READ_CHUNK = 8 * 1024 * 1024
 
-# Extensions refused outright (executables / scripts). Phase-2 policy; can be
-# tightened to a strict allowlist later. Content is also magic-sniffed below.
-DISALLOWED_EXTENSIONS = {
-    "exe", "msi", "bat", "cmd", "com", "scr", "pif", "cpl", "jar",
-    "js", "vbs", "vbe", "ws", "wsf", "wsh", "ps1", "psm1", "sh",
-}
+# Extensions refused outright. This is a general-purpose internal file-transfer
+# system, so by default ALL file types are accepted (executables included).
+# Add extensions here only if a deployment needs to block specific types.
+DISALLOWED_EXTENSIONS: set[str] = set()
 
 
 def sniff_content_type(sample: bytes) -> str:
@@ -152,6 +150,41 @@ def activate_file(stored_file_id: int, *, recipient_ids=None, assigned_by=None,
 
     transaction.on_commit(lambda: _enqueue_post_activation(sf.pk, notify=notify))
     return sf
+
+
+@transaction.atomic
+def add_recipients(stored_file_id: int, *, recipient_ids=None, groups=None,
+                   assigned_by=None, notify: bool = True) -> int:
+    """Share an already-active file with more people/groups (§5.8).
+
+    Creates a FileAssignment per new recipient and places the file into each
+    group's shared space. Returns the number of *new* recipient assignments.
+    Notification emails go only to the newly added recipients.
+    """
+    sf = StoredFile.objects.select_for_update().get(pk=stored_file_id)
+    new_ids = []
+    for rid in set(recipient_ids or []):
+        _, created = FileAssignment.objects.get_or_create(
+            stored_file=sf, recipient_id=rid, defaults={"assigned_by": assigned_by}
+        )
+        if created:
+            new_ids.append(rid)
+    if groups:
+        sf.groups.add(*groups)
+    if notify and new_ids:
+        ids = list(new_ids)
+        transaction.on_commit(lambda: _notify_recipients(sf.pk, ids))
+    return len(new_ids)
+
+
+def _notify_recipients(stored_file_id: int, recipient_ids) -> None:
+    """Send assignment-notification emails to specific recipients of a file."""
+    from apps.notifications.tasks import enqueue_assignment_email
+
+    for assignment in FileAssignment.objects.filter(
+        stored_file_id=stored_file_id, recipient_id__in=list(recipient_ids)
+    ).select_related("recipient", "assigned_by", "stored_file"):
+        enqueue_assignment_email(assignment)
 
 
 def _enqueue_post_activation(stored_file_id: int, *, notify: bool = True) -> None:

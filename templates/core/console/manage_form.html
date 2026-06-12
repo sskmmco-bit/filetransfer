@@ -5,6 +5,6 @@
   <div class="sub"><a href="{% url 'core:manage_list' key=resource.key %}">&larr; Back to {{ resource.label|lower }}</a></div></div>
 
 <div class="card form-card">
-  {% include "core/console/_manage_form.html" %}
+  {% include form_template|default:"core/console/_manage_form.html" %}
 </div>
 {% endblock %}

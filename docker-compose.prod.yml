@@ -4,7 +4,7 @@
 
 services:
   web:
-    command: gunicorn mmftp.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+    command: gunicorn mmftp.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 600
     volumes:
       - static_data:/app/staticfiles
     ports: []          # not exposed directly; nginx is the entry point

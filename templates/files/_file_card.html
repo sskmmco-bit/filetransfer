@@ -1,0 +1,30 @@
+{% comment %}One grid-view file card. Params: f (StoredFile), selectable, can_delete.
+Images show a thumbnail (files:thumb); other types show a coloured extension chip.{% endcomment %}
+{% load file_extras %}
+<div class="file-card">
+  {% if selectable %}<input type="checkbox" name="uuids" value="{{ f.uuid }}" class="fcheck fc-check" title="Select">{% endif %}
+  <a class="fc-thumb {{ f.original_filename|ftype }}" href="{% url 'files:detail' uuid=f.uuid %}">
+    <span class="fc-ext">{{ f.original_filename|fext }}</span>
+    {% if f.status == 'active' and f.original_filename|ftype == 'img' %}
+      <img src="{% url 'files:thumb' uuid=f.uuid %}" loading="lazy" alt="" onerror="this.remove()">
+    {% endif %}
+  </a>
+  <div class="fc-body">
+    <a class="fc-name" href="{% url 'files:detail' uuid=f.uuid %}" title="{{ f.display_name }}">{{ f.display_name }}</a>
+    <div class="fc-sub">{{ f.original_filename|fext }} · {{ f.size|filesizeformat }}</div>
+  </div>
+  <div class="fc-actions">
+    {% if f|previewable %}
+    <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
+      <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
+    {% endif %}
+    {% if f.status == 'active' %}
+    <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
+    {% endif %}
+    {% if can_delete %}
+    <button type="button" class="iaction danger js-del" data-url="{% url 'files:delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
+    {% endif %}
+  </div>
+</div>

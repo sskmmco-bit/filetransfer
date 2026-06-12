@@ -19,11 +19,19 @@
   {% endif %}
 </div>
 
-<div class="card" style="margin-top:18px;">
-  <h3 style="margin-top:0;">Files in this group</h3>
+<div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0;">
+    <h3 style="margin:0;">Files in this group</h3>
+    {% if files %}{% include "files/_view_toggle.html" %}{% endif %}
+  </div>
   {% if files %}
-  <form method="post" action="{% url 'files:download_zip' %}">
+  <form method="post" action="{% url 'files:download_zip' %}" style="margin-top:14px;">
     {% csrf_token %}
+    {% if view == 'grid' %}
+    <div class="file-grid">
+      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True %}{% endfor %}
+    </div>
+    {% else %}
     <div class="flist">
       <div class="flist-head" style="grid-template-columns:1fr 150px 120px;">
         <span>Name</span><span class="h-date">Added</span><span style="text-align:right;">Actions</span>
@@ -50,6 +58,7 @@
       </div>
       {% endfor %}
     </div>
+    {% endif %}
     <div class="flist-bulk">
       <button type="submit" class="btn-ghost">⬇ Download selected as ZIP</button>
     </div>

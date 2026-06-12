@@ -49,6 +49,47 @@
   .fd-check input{width:auto;}
   .fd-back{display:inline-flex;align-items:center;gap:6px;color:var(--muted);margin-bottom:14px;font-size:13px;}
   @media (max-width:900px){ .fd-grid{grid-template-columns:1fr;} .fd-preview{position:static;} }
+
+  /* shared-with pills */
+  .fd-shared{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;}
+  .fd-pill{display:inline-flex;align-items:center;gap:8px;background:#f3f7ef;border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px 4px 5px;font-size:13px;font-weight:500;}
+  .fd-av{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--accent),#9ccb7e);}
+  .fd-av.grp{border-radius:7px;background:linear-gradient(135deg,var(--accent2),var(--accent));}
+
+  /* share modal picker */
+  #shareModal .cmodal-card{max-width:560px;padding:0;display:flex;flex-direction:column;max-height:86vh;}
+  .sh-head{padding:18px 22px 14px;border-bottom:1px solid var(--line);}
+  .sh-head h2{margin:0;font-size:18px;}
+  .sh-head .sub{color:var(--muted);font-size:13px;margin-top:2px;}
+  .sh-body{padding:18px 22px;overflow-y:auto;flex:1;min-height:0;}
+  .sh-foot{border-top:1px solid var(--line);padding:14px 22px;display:flex;align-items:center;gap:10px;}
+  .sh-foot .spacer{flex:1;}
+  .sh-searchwrap{position:relative;margin-bottom:12px;}
+  .sh-searchwrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--muted);}
+  .sh-search{width:100%;padding:11px 13px 11px 36px;border:1px solid #d4ddca;border-radius:10px;font-size:14px;}
+  .sh-selected{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+  .sh-chip{display:inline-flex;align-items:center;gap:8px;background:var(--accent-soft);border:1px solid #d3e6c5;
+    border-radius:999px;padding:4px 6px 4px 5px;font-size:13px;font-weight:500;}
+  .sh-chip .x{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0 3px;}
+  .sh-chip .x:hover{color:var(--red);}
+  .sh-empty{border:1.5px dashed #cdd9c1;border-radius:12px;padding:16px;text-align:center;color:var(--muted);font-size:13px;margin-bottom:12px;}
+  .sh-grouplabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 6px;}
+  .sh-avail{border:1px solid var(--line);border-radius:12px;padding:6px;max-height:220px;overflow-y:auto;}
+  .sh-row{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;background:transparent;
+    border-radius:9px;cursor:pointer;text-align:left;font-size:14px;color:var(--ink);}
+  .sh-row:hover{background:var(--accent-soft);}
+  .sh-rm{flex:1;min-width:0;line-height:1.2;}
+  .sh-rn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
+  .sh-ru{color:var(--muted);font-size:12px;}
+  .sh-plus{color:var(--accent2);font-weight:700;font-size:18px;}
+  .sh-av{width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--accent),#9ccb7e);}
+  .sh-av.grp{border-radius:8px;background:linear-gradient(135deg,var(--accent2),var(--accent));}
+  .sh-none{color:var(--muted);font-size:13px;text-align:center;padding:14px;}
+  .sh-notify{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);}
+  .sh-notify input{width:auto;}
 </style>
 
 <a class="fd-back" href="{% url 'files:my_uploads' %}">← Back to My Files</a>
@@ -122,27 +163,60 @@
           <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg> Download
         </a>
         {% if is_owner %}
-        <a class="fd-btn secondary" href="#fd-share">
-          <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg> Share
-        </a>
+        <button type="button" class="fd-btn secondary" id="openShareBtn">
+          <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg> Share with people
+        </button>
         {% endif %}
       </div>
       {% if is_owner %}
       <div class="fd-danger">
         <div class="lbl">Danger zone</div>
-        <form method="post" action="{% url 'files:delete' uuid=file.uuid %}"
-              onsubmit="return confirm('Delete “{{ file.display_name|escapejs }}”? The stored file is removed; the record is kept for audit.');">
+        <form method="post" action="{% url 'files:delete' uuid=file.uuid %}" id="fdDelForm">
           {% csrf_token %}
-          <button type="submit" class="fd-del">Delete this file</button>
+          <button type="button" class="fd-del"
+                  onclick="confirmAction({title:'Delete file?',message:'Delete “{{ file.display_name|escapejs }}”? The stored file is removed; the record is kept for audit.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('fdDelForm').submit();}})">Delete this file</button>
         </form>
       </div>
       {% endif %}
     </div></div>
     {% endif %}
 
+    {% if is_owner and file.status == 'pending_metadata' %}
+    <div class="fd-card"><div class="pad">
+      <h3>Finish setup</h3>
+      <p class="hint" style="margin:0 0 14px;">This file is uploaded but not shared yet. Add details and choose who can access it to make it active.</p>
+      <div class="fd-actions">
+        <a class="fd-btn primary" href="{% url 'files:edit' uuid=file.uuid %}" data-modal>
+          <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg> Complete details &amp; share
+        </a>
+      </div>
+      <div class="fd-danger">
+        <div class="lbl">Danger zone</div>
+        <form method="post" action="{% url 'files:delete' uuid=file.uuid %}" id="fdDelForm">
+          {% csrf_token %}
+          <button type="button" class="fd-del"
+                  onclick="confirmAction({title:'Delete draft?',message:'Delete “{{ file.display_name|escapejs }}”? This upload will be discarded.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('fdDelForm').submit();}})">Delete this draft</button>
+        </form>
+      </div>
+    </div></div>
+    {% endif %}
+
     {% if is_owner and file.is_active %}
     <div class="fd-card" id="fd-share"><div class="pad">
-      <h3>Share file</h3>
+      <h3>Shared with</h3>
+      {% if shared_users or shared_groups %}
+        <div class="fd-shared">
+          {% for g in shared_groups %}<span class="fd-pill grp"><span class="fd-av grp">{{ g.initials }}</span>{{ g.name }}</span>{% endfor %}
+          {% for u in shared_users %}<span class="fd-pill"><span class="fd-av">{{ u.initials }}</span>{{ u.name }}</span>{% endfor %}
+        </div>
+      {% else %}
+        <p class="hint" style="margin:0 0 12px;">Not shared with anyone yet.</p>
+      {% endif %}
+      <button type="button" class="fd-btn secondary" id="openShareBtn2">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Add people or groups
+      </button>
+
+      <h3 style="margin-top:22px;">Public link</h3>
       {% if file.is_public and file.public_token %}
         {% url 'public:landing' token=file.public_token as public_url %}
         <p class="hint" style="margin:0 0 4px;">Anyone with this link can download{% if file.public_require_email_verify %} (after email verification){% endif %}.</p>
@@ -172,6 +246,35 @@
   </div>
 </div>
 
+{% if is_owner and file.is_active %}
+{# ---------------- Share modal ---------------- #}
+<div id="shareModal" class="cmodal" hidden>
+  <div class="cmodal-card">
+    <button type="button" class="cmodal-x" id="shClose" aria-label="Close">&times;</button>
+    <div class="sh-head">
+      <h2>Share file</h2>
+      <div class="sub">Add people or groups who can access “{{ file.display_name }}”.</div>
+    </div>
+    <div class="sh-body">
+      <div class="sh-searchwrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input type="text" class="sh-search" id="shSearch" placeholder="Search people or groups…" autocomplete="off">
+      </div>
+      <div class="sh-selected" id="shSelected"></div>
+      <div id="shAvail"></div>
+    </div>
+    <div class="sh-foot">
+      <label class="sh-notify"><input type="checkbox" id="shNotify" checked> Email them a notification</label>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost btn-sm" id="shCancel">Cancel</button>
+      <button type="button" class="btn btn-sm" id="shSubmit" disabled>Share</button>
+    </div>
+  </div>
+</div>
+{{ share_users|json_script:"sh-users" }}
+{{ share_groups|json_script:"sh-groups" }}
+{% endif %}
+
 <script>
 (function(){
   var btn=document.getElementById('fdCopy');
@@ -182,6 +285,71 @@
       setTimeout(function(){btn.textContent=t;},1500);
     }).catch(function(){ document.execCommand('copy'); });
   });
+
+  var modal = document.getElementById('shareModal');
+  if(!modal) return;
+  var usersEl = document.getElementById('sh-users');
+  var groupsEl = document.getElementById('sh-groups');
+  var users  = JSON.parse((usersEl && usersEl.textContent) || '[]').filter(function(u){return !u.shared;});
+  var groups = JSON.parse((groupsEl && groupsEl.textContent) || '[]').filter(function(g){return !g.shared;});
+  var search = document.getElementById('shSearch');
+  var selBox = document.getElementById('shSelected');
+  var availBox = document.getElementById('shAvail');
+  var submit = document.getElementById('shSubmit');
+  var notify = document.getElementById('shNotify');
+  var selUsers = new Set(), selGroups = new Set();
+
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function u(id){return users.find(function(x){return String(x.id)===String(id);});}
+  function g(id){return groups.find(function(x){return String(x.id)===String(id);});}
+
+  function render(){
+    var chips = [];
+    selGroups.forEach(function(id){var x=g(id); if(x) chips.push('<span class="sh-chip"><span class="sh-av grp">'+esc(x.initials)+'</span>'+esc(x.name)+'<button type="button" class="x" data-rg="'+x.id+'">&times;</button></span>');});
+    selUsers.forEach(function(id){var x=u(id); if(x) chips.push('<span class="sh-chip"><span class="sh-av">'+esc(x.initials)+'</span>'+esc(x.name)+'<button type="button" class="x" data-ru="'+x.id+'">&times;</button></span>');});
+    selBox.innerHTML = chips.join('');
+    submit.disabled = (selUsers.size + selGroups.size) === 0;
+
+    var q = search.value.trim().toLowerCase();
+    var ag = groups.filter(function(x){return !selGroups.has(String(x.id)) && (!q || x.name.toLowerCase().indexOf(q)!==-1);});
+    var au = users.filter(function(x){return !selUsers.has(String(x.id)) && (!q || x.name.toLowerCase().indexOf(q)!==-1 || x.username.toLowerCase().indexOf(q)!==-1);});
+    var html = '';
+    if(ag.length){ html += '<div class="sh-grouplabel">Groups</div><div class="sh-avail">'+ag.map(function(x){return '<button type="button" class="sh-row" data-ag="'+x.id+'"><span class="sh-av grp">'+esc(x.initials)+'</span><span class="sh-rm"><span class="sh-rn">'+esc(x.name)+'</span></span><span class="sh-plus">+</span></button>';}).join('')+'</div>'; }
+    if(au.length){ html += '<div class="sh-grouplabel">People</div><div class="sh-avail">'+au.map(function(x){return '<button type="button" class="sh-row" data-au="'+x.id+'"><span class="sh-av">'+esc(x.initials)+'</span><span class="sh-rm"><span class="sh-rn">'+esc(x.name)+'</span><span class="sh-ru">@'+esc(x.username)+'</span></span><span class="sh-plus">+</span></button>';}).join('')+'</div>'; }
+    if(!ag.length && !au.length){ html = '<div class="sh-none">'+(q?'No matches':'Everyone already has access')+'</div>'; }
+    availBox.innerHTML = html;
+  }
+
+  function open(){ modal.hidden=false; search.value=''; render(); search.focus(); }
+  function close(){ modal.hidden=true; }
+  ['openShareBtn','openShareBtn2'].forEach(function(id){var b=document.getElementById(id); if(b) b.addEventListener('click',open);});
+  document.getElementById('shClose').addEventListener('click',close);
+  document.getElementById('shCancel').addEventListener('click',close);
+  modal.addEventListener('click',function(e){ if(e.target===modal) close(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape' && !modal.hidden) close(); });
+  search.addEventListener('input',render);
+
+  modal.addEventListener('click',function(e){
+    var ag=e.target.closest('[data-ag]'); if(ag){selGroups.add(String(ag.dataset.ag));search.value='';render();search.focus();return;}
+    var au=e.target.closest('[data-au]'); if(au){selUsers.add(String(au.dataset.au));search.value='';render();search.focus();return;}
+    var rg=e.target.closest('[data-rg]'); if(rg){selGroups.delete(String(rg.dataset.rg));render();return;}
+    var ru=e.target.closest('[data-ru]'); if(ru){selUsers.delete(String(ru.dataset.ru));render();return;}
+  });
+
+  submit.addEventListener('click',function(){
+    if(submit.disabled) return;
+    submit.disabled=true; submit.textContent='Sharing…';
+    fetch('{% url "files:share" uuid=file.uuid %}', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest','X-CSRFToken':'{{ csrf_token }}'},
+      body: JSON.stringify({user_ids:Array.from(selUsers), group_ids:Array.from(selGroups), notify:notify.checked})
+    }).then(function(r){return r.json();}).then(function(d){
+      if(d.ok){ window.location.reload(); }
+      else { alert(d.error||'Could not share.'); submit.disabled=false; submit.textContent='Share'; }
+    }).catch(function(){ alert('Request failed.'); submit.disabled=false; submit.textContent='Share'; });
+  });
 })();
 </script>
+
+{% include "core/console/_modal.html" %}
 {% endblock %}

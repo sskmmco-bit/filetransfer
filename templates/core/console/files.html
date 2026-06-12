@@ -62,9 +62,12 @@
 (function(){
   document.querySelectorAll('.js-fdel').forEach(function(b){
     b.addEventListener('click',function(){
-      if(confirm('Soft-delete "'+b.dataset.name+'"? The stored object is removed; the record is kept.')){
-        var f=document.getElementById('fdelForm'); f.action=b.dataset.url; f.submit();
-      }
+      confirmAction({
+        title:'Delete file?',
+        message:'Soft-delete "'+b.dataset.name+'"? The stored object is removed; the record is kept for audit.',
+        confirmLabel:'Delete', danger:true,
+        onConfirm:function(){ var f=document.getElementById('fdelForm'); f.action=b.dataset.url; f.submit(); }
+      });
     });
   });
 })();

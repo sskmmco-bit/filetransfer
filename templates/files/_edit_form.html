@@ -1,0 +1,190 @@
+{% comment %}Modal "Add details" form for finalizing/editing a file. Loaded into
+the console modal (#cmodal) via AJAX; posts with [data-cform]. Reuses the global
+.switch toggle + .cmodal card.{% endcomment %}
+{% load file_extras %}
+<style>
+  #cmodal .cmodal-card{max-width:640px;padding:0;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;}
+  #cmodal #cmodal-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+  .ef{flex:1;min-height:0;display:flex;flex-direction:column;}
+  .ef-head{padding:20px 24px 14px;border-bottom:1px solid var(--line);}
+  .ef-head h2{margin:0;font-size:19px;font-weight:700;}
+  .ef-head .sub{color:var(--muted);font-size:12.5px;margin-top:3px;word-break:break-word;}
+  .ef-body{flex:1;min-height:0;overflow-y:auto;padding:18px 24px;}
+  .ef-foot{border-top:1px solid var(--line);padding:14px 24px;background:#fff;display:flex;justify-content:flex-end;gap:10px;}
+  .ef-err{background:var(--red-bg);color:#b42318;border:1px solid #f3c9c4;border-radius:10px;padding:10px 13px;font-size:13px;margin-bottom:14px;}
+  .ef-sec-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent2);
+    margin:20px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line);}
+  .ef-sec-h:first-child{margin-top:0;}
+  .ef-field{margin-bottom:14px;}
+  .ef-field label{display:block;font-size:13px;font-weight:600;color:#3c4a38;margin:0 0 6px;}
+  .ef input[type=text],.ef input[type=number],.ef input[type=date],.ef textarea,.ef select{width:100%;padding:10px 12px;
+    border:1px solid #d4ddca;border-radius:10px;font-size:14px;background:#fff;color:var(--ink);}
+  .ef textarea{resize:vertical;min-height:64px;}
+  .ef input:focus,.ef textarea:focus,.ef select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .ef .errorlist{color:var(--red);font-size:12px;margin-top:5px;list-style:none;padding:0;}
+  .ef-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;}
+  @media(max-width:560px){.ef-grid{grid-template-columns:1fr;}}
+  .ef-tog{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid #f0f3ec;}
+  .ef-tog:last-child{border-bottom:0;}
+  .ef-tog .nm{font-weight:600;font-size:13.5px;}
+  .ef-tog .sb{color:var(--muted);font-size:12px;margin-top:1px;}
+  /* picker */
+  .ef-picker{margin-bottom:6px;}
+  .ef-searchwrap{position:relative;}
+  .ef-searchwrap svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--muted);}
+  .ef-search{width:100%;padding:10px 12px 10px 34px !important;border:1px solid #d4ddca;border-radius:10px;font-size:14px;}
+  .ef-chips{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0;}
+  .ef-chip{display:inline-flex;align-items:center;gap:7px;background:var(--accent-soft);border:1px solid #d3e6c5;
+    border-radius:999px;padding:3px 7px 3px 4px;font-size:13px;font-weight:500;}
+  .ef-chip .x{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 2px;}
+  .ef-chip .x:hover{color:var(--red);}
+  .ef-empty{color:var(--muted);font-size:12.5px;}
+  .ef-availlabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:6px 0;}
+  .ef-avail{border:1px solid var(--line);border-radius:11px;padding:5px;max-height:160px;overflow-y:auto;}
+  .ef-row{width:100%;display:flex;align-items:center;gap:9px;padding:7px 9px;border:0;background:transparent;border-radius:8px;cursor:pointer;text-align:left;font-size:14px;color:var(--ink);}
+  .ef-row:hover{background:var(--accent-soft);}
+  .ef-rn{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ef-plus{color:var(--accent2);font-weight:700;font-size:16px;}
+  .ef-none{color:var(--muted);font-size:12.5px;text-align:center;padding:12px;}
+  .ef-av{width:24px;height:24px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--accent),#9ccb7e);}
+  .ef-av.grp{border-radius:6px;background:linear-gradient(135deg,var(--accent2),var(--accent));}
+</style>
+
+<form class="ef" method="post" data-cform action="{% url 'files:edit' uuid=file.uuid %}">
+  {% csrf_token %}
+  <div class="ef-head">
+    <h2>Add details</h2>
+    <div class="sub">{{ file.original_filename }} · {{ file.size|filesizeformat }} — all fields are optional. {% if file.is_active %}Save your changes.{% else %}Save to activate it; you can share later.{% endif %}</div>
+  </div>
+
+  <div class="ef-body">
+    {% if form.non_field_errors %}<div class="ef-err">{{ form.non_field_errors }}</div>{% endif %}
+
+    <div class="ef-sec-h">Details</div>
+    <div class="ef-field">
+      <label for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}
+      {% for e in form.title.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+    </div>
+    <div class="ef-field">
+      <label for="{{ form.description.id_for_label }}">Description</label>{{ form.description }}
+      {% for e in form.description.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+    </div>
+
+    <div class="ef-sec-h">Share with <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);">— optional</span></div>
+    <div class="ef-field">
+      <div style="display:none">{{ form.recipients }}{{ form.groups }}</div>
+      <div class="ef-picker" data-userssel="{{ form.recipients.id_for_label }}" data-groupssel="{{ form.groups.id_for_label }}">
+        <div class="ef-searchwrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          <input type="text" class="ef-search" placeholder="Search people or groups…" autocomplete="off"></div>
+        <div class="ef-chips"></div>
+        <div class="ef-availlabel">Available</div>
+        <div class="ef-avail"></div>
+      </div>
+      <div class="hint" style="margin-top:6px;">Leave empty to keep the file private — you can share it anytime later. Selecting a group assigns all its members.</div>
+    </div>
+
+    <div class="ef-sec-h">Options</div>
+    <div class="ef-tog">
+      <div><div class="nm">Hidden</div><div class="sb">Hide from listings (still accessible by link).</div></div>
+      <label class="switch">{{ form.is_hidden }}<span class="slider"></span></label>
+    </div>
+    <div class="ef-tog">
+      <div><div class="nm">Public link</div><div class="sb">Anyone with the link can download.</div></div>
+      <label class="switch">{{ form.is_public }}<span class="slider"></span></label>
+    </div>
+    <div class="ef-tog">
+      <div><div class="nm">Require email verification</div><div class="sb">Public downloaders verify by email (OTP).</div></div>
+      <label class="switch">{{ form.public_require_email_verify }}<span class="slider"></span></label>
+    </div>
+    {% for e in form.public_require_email_verify.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+
+    <div class="ef-grid" style="margin-top:14px;">
+      <div class="ef-field">
+        <label for="efExpiryPreset">Expiry</label>
+        <select id="efExpiryPreset">
+          <option value="">Keep forever</option>
+          <option value="365">1 year</option>
+          <option value="60">60 days</option>
+          <option value="30">30 days</option>
+          <option value="7">7 days</option>
+          <option value="3">3 days</option>
+          <option value="1">1 day</option>
+          <option value="custom">Custom date…</option>
+        </select>
+        <div id="efExpiryCustom" hidden style="margin-top:8px;">{{ form.expiry_date }}</div>
+        {% for e in form.expiry_date.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="ef-field"><label for="{{ form.download_limit.id_for_label }}">Download limit</label>{{ form.download_limit }}
+        {% for e in form.download_limit.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>
+    </div>
+    <div class="ef-field"><label for="{{ form.categories.id_for_label }}">Categories</label>{{ form.categories }}</div>
+
+    {% for field in form %}
+      {% if field.name|slice:":3" == "cf_" %}
+      <div class="ef-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+        {% for e in field.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="ef-foot">
+    <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
+    <button type="submit" class="btn btn-sm">{% if file.is_active %}Save changes{% else %}Save &amp; activate{% endif %}</button>
+  </div>
+</form>
+
+<script>
+(function(){
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function initials(s){var t=s.replace(/\(.*$/,'').trim().split(/\s+/);return(((t[0]||'')[0]||'')+((t[1]||'')[0]||'')).toUpperCase();}
+
+  // Combined people + groups picker (one search, two underlying <select multiple>).
+  function attach(root){
+    var usel=document.getElementById(root.dataset.userssel);
+    var gsel=document.getElementById(root.dataset.groupssel);
+    var items=[];
+    if(usel) Array.prototype.forEach.call(usel.options,function(o){ if(o.value) items.push({kind:'user',opt:o}); });
+    if(gsel) Array.prototype.forEach.call(gsel.options,function(o){ if(o.value) items.push({kind:'group',opt:o}); });
+    var search=root.querySelector('.ef-search'), chips=root.querySelector('.ef-chips'), avail=root.querySelector('.ef-avail');
+    function lbl(it){return it.opt.textContent.trim();}
+    function av(it){return '<span class="ef-av '+(it.kind==='group'?'grp':'')+'">'+esc(it.kind==='group'?'#':initials(lbl(it)))+'</span>';}
+    function render(){
+      var sel=items.filter(function(it){return it.opt.selected;});
+      chips.innerHTML = sel.length ? sel.map(function(it){
+        return '<span class="ef-chip">'+av(it)+esc(lbl(it))+'<button type="button" class="x" data-k="'+it.kind+'" data-v="'+esc(it.opt.value)+'">&times;</button></span>';
+      }).join('') : '<div class="ef-empty">None selected</div>';
+      var q=search.value.trim().toLowerCase();
+      var a=items.filter(function(it){return !it.opt.selected && (!q || lbl(it).toLowerCase().indexOf(q)!==-1);});
+      avail.innerHTML = a.length ? a.map(function(it){
+        return '<button type="button" class="ef-row" data-k="'+it.kind+'" data-add="'+esc(it.opt.value)+'">'+av(it)+
+          '<span class="ef-rn">'+esc(lbl(it))+(it.kind==='group'?' <span style="color:var(--muted);font-size:12px;">· group</span>':'')+'</span><span class="ef-plus">+</span></button>';
+      }).join('') : '<div class="ef-none">'+(q?'No matches':'All added')+'</div>';
+    }
+    function find(kind,v){return items.filter(function(it){return it.kind===kind && it.opt.value===v;})[0];}
+    root.addEventListener('click',function(e){
+      var a=e.target.closest('[data-add]'); if(a){var it=find(a.dataset.k,a.dataset.add); if(it){it.opt.selected=true; search.value=''; render(); search.focus();} return;}
+      var x=e.target.closest('[data-v]'); if(x){var it2=find(x.dataset.k,x.dataset.v); if(it2){it2.opt.selected=false; render();} return;}
+    });
+    search.addEventListener('input', render);
+    render();
+  }
+  document.querySelectorAll('#cmodal-body .ef-picker').forEach(attach);
+
+  // Expiry preset -> compute a date into the real (hidden) date field.
+  (function(){
+    var preset=document.getElementById('efExpiryPreset');
+    var custom=document.getElementById('efExpiryCustom');
+    var dateInput=custom ? custom.querySelector('input') : null;
+    if(!preset || !dateInput) return;
+    if(dateInput.value){ preset.value='custom'; custom.hidden=false; }   // editing an existing expiry
+    function fmt(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+    preset.addEventListener('change',function(){
+      var v=preset.value;
+      if(v===''){ dateInput.value=''; custom.hidden=true; }
+      else if(v==='custom'){ custom.hidden=false; dateInput.focus(); }
+      else { var d=new Date(); d.setDate(d.getDate()+parseInt(v,10)); dateInput.value=fmt(d); custom.hidden=true; }
+    });
+  })();
+})();
+</script>

@@ -1,25 +1,106 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Log in — MMFileTransfer{% endblock %}
-{% block content %}
-<div class="card" style="max-width:420px; margin:40px auto;">
-  <h1 style="margin-top:0; font-size:22px;">Log in</h1>
-  {% if form.non_field_errors %}
-    <ul class="errorlist">
-      {% for err in form.non_field_errors %}<li>{{ err }}</li>{% endfor %}
-    </ul>
-  {% endif %}
-  <form method="post" action="{% url 'accounts:login' %}">
-    {% csrf_token %}
-    <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
-    {{ form.username }}
-    {% for err in form.username.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
 
-    <label for="{{ form.password.id_for_label }}">Password</label>
-    {{ form.password }}
-    {% for err in form.password.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
+{% block fullpage %}
+<style>
+  body{background:#fff;}
+  .auth{display:flex;min-height:100vh;background:#fff;}
+  /* ---------- left: form ---------- */
+  .auth-form{flex:1;display:flex;align-items:center;justify-content:center;padding:40px 28px;}
+  .auth-inner{width:100%;max-width:380px;}
+  .auth-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;color:var(--ink);margin-bottom:40px;}
+  .auth-brand .logo{width:34px;height:34px;border-radius:10px;
+    background:linear-gradient(135deg,var(--accent),#9ccb7e);
+    display:flex;align-items:center;justify-content:center;}
+  .auth-inner h1{font-size:34px;font-weight:800;letter-spacing:-.02em;margin:0 0 8px;color:var(--ink);}
+  .auth-inner .lede{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 28px;}
+  .auth-err{background:var(--red-bg);color:#b42318;border:1px solid #f3c9c4;
+    border-radius:10px;padding:11px 14px;font-size:13px;margin-bottom:20px;}
+  .auth-err ul{margin:0;padding-left:18px;} .auth-err p{margin:0;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:13px;font-weight:600;color:#3c4a38;margin:0 0 7px;}
+  .field input{width:100%;padding:13px 15px;border:1px solid #d4ddca;border-radius:12px;
+    font-size:14px;background:#fff;color:var(--ink);transition:border-color .15s,box-shadow .15s;}
+  .field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .pw-wrap{position:relative;}
+  .pw-wrap input{padding-right:46px;}
+  .pw-toggle{position:absolute;top:50%;right:8px;transform:translateY(-50%);background:transparent;
+    border:0;padding:8px;cursor:pointer;color:var(--muted);border-radius:8px;line-height:0;}
+  .pw-toggle:hover{color:var(--accent2);background:var(--accent-soft);}
+  .pw-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .auth-cta{width:100%;border:0;border-radius:12px;padding:14px;font-size:15px;font-weight:600;
+    color:#fff;cursor:pointer;margin-top:6px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 6px 18px rgba(85,138,60,.28);}
+  .auth-cta:hover{filter:brightness(1.05);}
+  .field-err{color:var(--red);font-size:12px;margin-top:6px;}
 
-    <input type="hidden" name="next" value="{{ next }}">
-    <button type="submit">Log in</button>
-  </form>
+  /* ---------- right: showcase panel ---------- */
+  .auth-art{flex:1;padding:24px 24px 24px 0;display:none;}
+  .auth-art-inner{height:100%;border-radius:28px;background:#f1f5ef;
+    overflow:hidden;position:relative;
+    display:flex;align-items:center;justify-content:center;padding:48px;}
+  .auth-illus{max-width:100%;max-height:100%;width:auto;height:auto;
+    object-fit:contain;display:block;}
+
+  @media(min-width:900px){.auth-art{display:block;}}
+</style>
+
+<div class="auth">
+  <div class="auth-form">
+    <div class="auth-inner">
+      <div class="auth-brand">
+        <span class="logo">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M4 4h7l2 2h7a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/></svg>
+        </span>
+        MMFileTransfer
+      </div>
+
+      <h1>Welcome back!</h1>
+      <p class="lede">Sign in to upload, share and manage your files securely.</p>
+
+      {% if form.non_field_errors %}
+        <div class="auth-err">
+          {% if form.non_field_errors|length > 1 %}
+            <ul>{% for err in form.non_field_errors %}<li>{{ err }}</li>{% endfor %}</ul>
+          {% else %}
+            <p>{{ form.non_field_errors.0 }}</p>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <form method="post" action="{% url 'accounts:login' %}" novalidate>
+        {% csrf_token %}
+
+        <div class="field">
+          <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+          {{ form.username }}
+          {% for err in form.username.errors %}<div class="field-err">{{ err }}</div>{% endfor %}
+        </div>
+
+        <div class="field">
+          <label for="{{ form.password.id_for_label }}">Password</label>
+          <div class="pw-wrap">
+            {{ form.password }}
+            <button type="button" class="pw-toggle" aria-label="Show password"
+                    onclick="(function(b){var i=b.parentNode.querySelector('input');var s=i.type==='password';i.type=s?'text':'password';b.setAttribute('aria-label',s?'Hide password':'Show password');b.classList.toggle('on',s);})(this)">
+              <svg viewBox="0 0 24 24"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7S19 19 12 19 1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          {% for err in form.password.errors %}<div class="field-err">{{ err }}</div>{% endfor %}
+        </div>
+
+        <input type="hidden" name="next" value="{{ next }}">
+        <button type="submit" class="auth-cta">Log in</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="auth-art">
+    <div class="auth-art-inner">
+      <img src="{% static 'img/login.png' %}" class="auth-illus" alt="MMFileTransfer">
+    </div>
+  </div>
 </div>
 {% endblock %}

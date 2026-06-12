@@ -1,0 +1,10 @@
+{% comment %}One settings toggle switch. Params: field, optional label & sub overrides.{% endcomment %}
+<div class="set2-tog">
+  <div>
+    <div class="set2-tog-name">{{ label|default:field.label }}</div>
+    {% if sub %}<div class="set2-tog-sub">{{ sub }}</div>
+    {% elif field.help_text %}<div class="set2-tog-sub">{{ field.help_text }}</div>{% endif %}
+  </div>
+  <label class="switch">{{ field }}<span class="slider"></span></label>
+  {% for e in field.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+</div>

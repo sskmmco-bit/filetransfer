@@ -15,6 +15,7 @@ urlpatterns = [
 
     # Site settings + files manager
     path("console/settings/", management.manage_settings, name="manage_settings"),
+    path("console/settings/test-smtp/", management.test_smtp, name="test_smtp"),
     path("console/files/", management.manage_files, name="manage_files"),
     path("console/files/<uuid:uuid>/delete/", management.manage_file_delete, name="manage_file_delete"),
 

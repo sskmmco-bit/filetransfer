@@ -136,10 +136,39 @@ def manage_edit(request, key, pk=None):
     else:
         form = resource.form(instance=instance)
 
-    ctx = {"resource": resource, "form": form, "is_new": pk is None}
+    # Users / groups / roles get richer, purpose-built forms; the rest are generic.
+    rich = {"users": "core/console/_manage_form_user.html",
+            "groups": "core/console/_manage_form_group.html",
+            "roles": "core/console/_manage_form_role.html"}
+    form_template = rich.get(resource.key, "core/console/_manage_form.html")
+    ctx = {"resource": resource, "form": form, "is_new": pk is None,
+           "form_template": form_template}
+    if resource.key == "roles" and "permissions" in form.fields:
+        from collections import OrderedDict
+        raw = form["permissions"].value() or []
+        selected = {str(getattr(x, "pk", x)) for x in raw}
+        groups: "OrderedDict[str, list]" = OrderedDict()
+        for p in form.fields["permissions"].queryset:
+            groups.setdefault(p.category or "Other", []).append({
+                "id": p.pk, "codename": p.codename, "label": p.label or p.codename,
+                "selected": str(p.pk) in selected})
+        ctx["permission_groups"] = [{"category": k, "items": v} for k, v in groups.items()]
+        ctx["permission_total"] = sum(len(v) for v in groups.values())
+    if resource.key == "groups" and "members" in form.fields:
+        raw = form["members"].value() or []
+        selected = {str(getattr(x, "pk", x)) for x in raw}
+        choices = []
+        for u in form.fields["members"].queryset:
+            full = (u.get_full_name() or u.username).strip()
+            parts = full.split()
+            initials = (parts[0][:1] + (parts[1][:1] if len(parts) > 1 else "")).upper()
+            choices.append({"id": u.pk, "name": full, "username": u.username,
+                            "initials": initials or u.username[:2].upper(),
+                            "selected": str(u.pk) in selected})
+        ctx["member_choices"] = choices
     if ajax:
         # Form fragment for the modal; 422 signals validation errors to the JS.
-        return render(request, "core/console/_manage_form.html", ctx,
+        return render(request, form_template, ctx,
                       status=422 if invalid else 200)
     return render(request, "core/console/manage_form.html", ctx)
 
@@ -191,6 +220,53 @@ def manage_settings(request):
     else:
         form = SiteSettingsForm(instance=obj)
     return render(request, "core/console/settings.html", {"form": form})
+
+
+def test_smtp(request):
+    """Probe an SMTP server with the posted (or saved) credentials (§5.11).
+
+    Returns JSON {ok, message}. A blank password falls back to the stored one so
+    admins can test without re-typing the secret.
+    """
+    import smtplib
+
+    from apps.config.models import SiteSettings
+
+    if not (request.user.is_authenticated and request.user.is_superadmin):
+        raise PermissionDenied("SuperAdmin access required.")
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "message": "POST required."}, status=405)
+
+    host = (request.POST.get("smtp_host") or "").strip()
+    if not host:
+        return JsonResponse({"ok": False, "message": "Enter an SMTP host first."})
+    try:
+        port = int(request.POST.get("smtp_port") or 0) or 587
+    except ValueError:
+        return JsonResponse({"ok": False, "message": "Port must be a number."})
+    username = (request.POST.get("smtp_username") or "").strip()
+    password = request.POST.get("smtp_password") or ""
+    use_tls = request.POST.get("smtp_use_tls") in ("on", "true", "1")
+    use_ssl = request.POST.get("smtp_use_ssl") in ("on", "true", "1")
+    if not password:  # blank => reuse the saved secret
+        password = SiteSettings.get().get_smtp_password()
+
+    try:
+        if use_ssl:
+            server = smtplib.SMTP_SSL(host, port, timeout=10)
+        else:
+            server = smtplib.SMTP(host, port, timeout=10)
+            if use_tls:
+                server.starttls()
+        try:
+            server.ehlo()
+            if username:
+                server.login(username, password)
+        finally:
+            server.quit()
+    except Exception as exc:  # noqa: BLE001 — surface the reason to the admin
+        return JsonResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"})
+    return JsonResponse({"ok": True, "message": f"Connected to {host}:{port} successfully."})
 
 
 # ---------------------------------------------------------------------------

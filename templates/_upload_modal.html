@@ -4,15 +4,16 @@ with [data-uw-open]. Uploads each file via the chunked endpoints with progress,
 then finalizes shared metadata + recipients in one call.
 {% endcomment %}
 <style>
-  .uw{position:fixed;inset:0;background:rgba(17,20,34,.55);display:flex;align-items:flex-start;
-    justify-content:center;padding:48px 16px;z-index:1100;overflow-y:auto;}
+  .uw{position:fixed;inset:0;background:rgba(17,20,34,.55);display:flex;
+    justify-content:center;padding:24px 16px;z-index:1100;overflow-y:auto;}
   .uw[hidden]{display:none;}
   .uw-card{background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(16,24,40,.3);
-    width:100%;max-width:640px;animation:cpop .12s ease-out;overflow:hidden;
-    display:flex;flex-direction:column;max-height:calc(100vh - 96px);}
+    width:100%;max-width:640px;margin:auto;animation:cpop .12s ease-out;overflow:hidden;
+    display:flex;flex-direction:column;max-height:calc(100vh - 48px);}
   .uw-head{display:flex;justify-content:space-between;align-items:flex-start;padding:20px 24px 14px;}
   .uw-head h2{margin:0 0 10px;font-size:19px;}
-  .uw-x{background:#f1f3f9;border:0;border-radius:9px;width:32px;height:32px;font-size:18px;cursor:pointer;color:var(--muted);}
+  .uw-x{background:#f1f3f9;border:0;border-radius:9px;width:32px;height:32px;font-size:18px;cursor:pointer;color:var(--muted);
+    display:flex;align-items:center;justify-content:center;line-height:1;padding:0;}
   .uw-x:hover{background:#e7eaf3;color:var(--ink);}
   .uw-steps{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);}
   .uw-step{display:flex;align-items:center;gap:6px;}
@@ -46,15 +47,56 @@ then finalizes shared metadata + recipients in one call.
   .uw-bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:999px;transition:width .15s;}
   .uw-frow.done .uw-bar i{background:var(--green);}
   .uw-frow .st{font-size:12px;color:var(--muted);margin-top:4px;}
-  .uw-frow .rm{background:transparent;border:0;color:#e0564a;cursor:pointer;font-size:16px;}
+  .uw-frow .rm{background:transparent;border:0;color:#e0564a;cursor:pointer;font-size:16px;padding:4px;}
+  .uw-act{display:flex;align-items:center;gap:6px;flex:none;}
+  .uw-act .uw-cancel{background:#fff;border:1px solid var(--line);color:var(--muted);border-radius:8px;
+    padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;}
+  .uw-act .uw-cancel:hover{border-color:#e0564a;color:#e0564a;}
+  .uw-act .uw-retry{background:#fff;border:1px solid var(--accent);color:var(--accent2);border-radius:8px;
+    padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;}
+  .uw-act .uw-retry:hover{background:#f0f4ec;}
   .uw-2col{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
   .uw-check{display:inline-flex;align-items:center;gap:7px;font-weight:500;margin-top:12px;}
   .uw-check input{width:auto;}
   .uw-recip-add{display:flex;gap:8px;}
   .uw-chips{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;}
-  .uw-chip{background:#eef0ff;color:var(--accent2);border-radius:999px;padding:5px 10px;font-size:13px;display:inline-flex;align-items:center;gap:7px;}
-  .uw-chip b{background:transparent;border:0;color:var(--accent2);cursor:pointer;font-weight:700;}
-  .uw-public{border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:18px;background:#fafbff;}
+  .uw-chip{background:var(--accent-soft);color:var(--ink);border:1px solid #d3e6c5;border-radius:999px;
+    padding:4px 8px 4px 5px;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:7px;}
+  .uw-chip b{background:transparent;border:0;color:var(--muted);cursor:pointer;font-weight:700;font-size:15px;line-height:1;}
+  .uw-chip b:hover{color:var(--red);}
+  .uw-cav{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:9px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--accent),#9ccb7e);}
+  .uw-cav.grp{border-radius:6px;background:linear-gradient(135deg,var(--accent2),var(--accent));}
+
+  /* searchable recipient picker */
+  .uw-picker{position:relative;}
+  .uw-pick-box{position:relative;}
+  .uw-pick-box svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--muted);}
+  .uw-pick-search{width:100%;padding:11px 13px 11px 36px;border:1px solid #d4ddca;border-radius:10px;font-size:14px;}
+  .uw-pick-list{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;background:#fff;
+    border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px rgba(16,24,40,.14);
+    max-height:240px;overflow-y:auto;padding:6px;}
+  .uw-pick-list[hidden]{display:none;}
+  .uw-pick-row{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;background:transparent;
+    border-radius:9px;cursor:pointer;text-align:left;font-size:14px;color:var(--ink);}
+  .uw-pick-row:hover{background:var(--accent-soft);}
+  .uw-pick-av{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--accent),#9ccb7e);}
+  .uw-pick-av.grp{border-radius:7px;background:linear-gradient(135deg,var(--accent2),var(--accent));}
+  .uw-pick-nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .uw-pick-plus{color:var(--accent2);font-weight:700;font-size:17px;}
+  .uw-pick-none{color:var(--muted);font-size:13px;text-align:center;padding:12px;}
+
+  /* public link card */
+  .uw-public-card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:18px;background:#fafbf7;}
+  .uw-public-head{display:flex;align-items:center;gap:12px;}
+  .uw-public-ic{width:38px;height:38px;border-radius:11px;background:var(--accent-soft);display:flex;
+    align-items:center;justify-content:center;font-size:18px;flex:none;}
+  .uw-public-t{font-weight:600;font-size:14px;}
+  .uw-public-s{color:var(--muted);font-size:12px;margin-top:1px;}
+  .uw-public-head .switch{margin-left:auto;}
+  .uw-public-opts{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:flex-start;gap:10px;}
   .uw-foot{display:flex;align-items:center;gap:10px;padding:16px 24px;border-top:1px solid var(--line);}
   .uw-foot .spacer{flex:1;}
   .uw-done{font-size:20px;font-weight:700;color:var(--green);margin-bottom:8px;}
@@ -64,12 +106,41 @@ then finalizes shared metadata + recipients in one call.
   .uw-link input{flex:1;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;background:#fff;color:#475569;}
   .uw-link .mini{padding:8px 12px;border-radius:9px;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--accent2);cursor:pointer;white-space:nowrap;}
   .uw-link .mini:hover{background:#f0f1ff;}
+  /* resume incomplete uploads banner */
+  .uw-resume{border:1px solid #f6dca4;background:#fffaf0;border-radius:12px;padding:12px 14px;margin-bottom:14px;}
+  .uw-resume-h{font-weight:600;font-size:13px;color:#b4730a;margin-bottom:8px;display:flex;align-items:center;gap:7px;}
+  .uw-rrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #f3e4c4;}
+  .uw-rrow:first-of-type{border-top:0;}
+  .uw-rrow .meta{flex:1;min-width:0;}
+  .uw-rrow .nm{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .uw-rrow .sub{color:var(--muted);font-size:12px;margin-top:1px;}
+  .uw-rrow .resume{background:var(--accent2);color:#fff;border:0;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;}
+  .uw-rrow .discard{background:transparent;border:0;color:#e0564a;cursor:pointer;font-size:13px;}
+  /* minimized floating uploads panel (Dropbox-style) */
+  .uw-mini{position:fixed;right:20px;bottom:20px;z-index:1090;width:340px;max-width:calc(100vw - 40px);
+    background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(16,24,40,.28);
+    padding:14px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;animation:cpop .12s ease-out;}
+  .uw-mini[hidden]{display:none;}
+  .uw-mini:hover{box-shadow:0 22px 60px rgba(16,24,40,.34);}
+  .uw-mini-ic{width:40px;height:40px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));}
+  .uw-mini-main{flex:1;min-width:0;}
+  .uw-mini-title{font-weight:600;font-size:14px;}
+  .uw-mini-sub{color:var(--muted);font-size:12px;margin:2px 0 6px;}
+  .uw-mini-bar{height:6px;border-radius:999px;background:#eef1f7;overflow:hidden;}
+  .uw-mini-bar i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .15s;}
+  .uw-mini-x{flex:none;background:#f1f3f9;border:0;border-radius:8px;width:28px;height:28px;font-size:16px;cursor:pointer;color:var(--muted);
+    display:flex;align-items:center;justify-content:center;line-height:1;padding:0;}
+  .uw-mini-x:hover{background:#e7eaf3;color:var(--ink);}
 </style>
 
 {% if can_upload %}
 <div id="uwModal" class="uw" hidden
      data-init="{% url 'files:init_upload' %}"
      data-chunk="{% url 'files:upload_chunk' %}"
+     data-status="{% url 'files:upload_status' %}"
+     data-incomplete="{% url 'files:incomplete_uploads' %}"
+     data-cancel="{% url 'files:upload_cancel' %}"
      data-complete="{% url 'files:upload_complete' %}"
      data-finalize="{% url 'files:upload_finalize' %}"
      data-myuploads="{% url 'files:my_uploads' %}"
@@ -84,17 +155,24 @@ then finalizes shared metadata + recipients in one call.
           <span class="uw-step" data-step="3"><i>3</i> Recipients</span>
         </div>
       </div>
-      <button type="button" class="uw-x" data-uw-close>&times;</button>
+      <div style="display:flex;gap:6px;">
+        <button type="button" class="uw-x" id="uwMinBtn" title="Minimize — keep uploading in the background">–</button>
+        <button type="button" class="uw-x" data-uw-close title="Close">&times;</button>
+      </div>
     </div>
 
     <div class="uw-body">
       <section data-panel="1">
+        <div class="uw-resume" id="uwResume" hidden></div>
+        <input type="file" id="uwResumeInput" hidden>
         <div class="uw-drop" id="uwDrop">
           <div class="uw-drop-ic">⬆</div>
           <div class="uw-drop-t">Drop files here or click to browse</div>
           <div class="hint">Any file type · chunked upload with resume support</div>
           <div class="uw-badges"><span>SHA-256 verification</span><span>Resumable</span><span>Multi-file</span></div>
+          <div style="margin-top:10px;"><a href="#" id="uwFolderBtn" class="hint" style="text-decoration:underline;">or select a folder</a></div>
           <input type="file" id="uwInput" multiple hidden>
+          <input type="file" id="uwInputDir" webkitdirectory multiple hidden>
         </div>
         <div class="uw-overall" id="uwOverall" hidden>
           <div class="lbl"><span id="uwOverallTxt">Overall progress</span><span id="uwOverallPct">0%</span></div>
@@ -131,25 +209,39 @@ then finalizes shared metadata + recipients in one call.
       </section>
 
       <section data-panel="3" hidden>
-        <label>Recipients <span class="hint">(select to add)</span></label>
-        <select id="uwUserSel">
-          <option value="">Select a user…</option>
+        <label>Share with <span class="hint">(search people &amp; groups)</span></label>
+        <div class="uw-picker" id="uwPicker">
+          <div class="uw-pick-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+            <input type="text" id="uwPickSearch" class="uw-pick-search" placeholder="Search people or groups…" autocomplete="off">
+          </div>
+          <div class="uw-pick-list" id="uwPickList" hidden></div>
+        </div>
+        <div class="uw-chips" id="uwChips"></div>
+        <div class="hint" style="margin-top:8px;">Pick at least one recipient/group, or enable a public link below — otherwise the file is only saved to your <b>My Files</b> and shared with no one.</div>
+
+        {# data source for the picker (kept hidden) #}
+        <select id="uwUserSel" style="display:none">
+          <option value=""></option>
           {% for u in upload_users %}<option value="{{ u.username }}">{{ u.get_full_name|default:u.username }}{% if u.email %} ({{ u.email }}){% endif %}</option>{% endfor %}
         </select>
         {% if upload_groups %}
-        <label style="margin-top:12px;">Groups <span class="hint">(select to add all members)</span></label>
-        <select id="uwGroupSel">
-          <option value="">Select a group…</option>
+        <select id="uwGroupSel" style="display:none">
+          <option value=""></option>
           {% for g in upload_groups %}<option value="{{ g.name }}">{{ g.name }}</option>{% endfor %}
         </select>
         {% endif %}
-        <div class="uw-chips" id="uwChips"></div>
-        <div class="hint" style="margin-top:8px;">Pick at least one recipient/group, or enable a public link below — otherwise the file is only saved to your <b>My Files</b> and shared with no one.</div>
-        <div class="uw-public">
-          <label class="uw-check" style="margin-top:0;"><input type="checkbox" id="uwPublic"> Generate a public link</label>
-          <div id="uwPublicOpts" hidden style="margin-top:8px;">
+
+        <div class="uw-public-card">
+          <div class="uw-public-head">
+            <span class="uw-public-ic">🌐</span>
+            <div><div class="uw-public-t">Public link</div>
+              <div class="uw-public-s">Anyone with the link can download — no account needed.</div></div>
+            <label class="switch"><input type="checkbox" id="uwPublic"><span class="slider"></span></label>
+          </div>
+          <div id="uwPublicOpts" hidden class="uw-public-opts">
             <label class="uw-check" style="margin-top:0;"><input type="checkbox" id="uwVerify"> Email OTP verification</label>
-            <label class="uw-check" style="margin-left:18px;margin-top:0;">Download limit
+            <label class="uw-check" style="margin-top:0;">Download limit
               <input type="number" id="uwLimit" min="1" placeholder="∞" style="width:80px;margin-left:6px;"></label>
           </div>
         </div>
@@ -174,10 +266,24 @@ then finalizes shared metadata + recipients in one call.
   </div>
 </div>
 
+<!-- Minimized uploads panel (bottom-left, like Dropbox) -->
+<div id="uwMini" class="uw-mini" hidden>
+  <div class="uw-mini-ic" id="uwMiniIc">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+  </div>
+  <div class="uw-mini-main">
+    <div class="uw-mini-title" id="uwMiniTitle">Uploading…</div>
+    <div class="uw-mini-sub" id="uwMiniSub"></div>
+    <div class="uw-mini-bar"><i id="uwMiniBar"></i></div>
+  </div>
+  <button type="button" class="uw-mini-x" id="uwMiniClose" title="Cancel all &amp; close">&times;</button>
+</div>
+
 <script>
 (function(){
   const m = document.getElementById('uwModal'); if(!m) return;
   const U = {init:m.dataset.init, chunk:m.dataset.chunk, complete:m.dataset.complete,
+            status:m.dataset.status, incomplete:m.dataset.incomplete, cancel:m.dataset.cancel,
             finalize:m.dataset.finalize, mine:m.dataset.myuploads, csrf:m.dataset.csrf};
   const $ = (id)=>document.getElementById(id);
   const files = [];            // {file, uuid, status, sent}
@@ -185,9 +291,11 @@ then finalizes shared metadata + recipients in one call.
   let step = 1;
 
   function open(preselectGroup){ reset(); m.hidden=false;
-    if(preselectGroup){ addRecip(preselectGroup, '👥 '+preselectGroup); } }
+    if(preselectGroup){ addRecip(preselectGroup, preselectGroup, 'group'); }
+    loadIncomplete(); }
   function close(){ m.hidden=true; }
   function reset(){
+    files.forEach(r=>{ if(r.ctrl) r.ctrl.abort(); });  // stop any in-flight transfers
     files.length=0; recipients.length=0; step=1;
     $('uwFiles').innerHTML=''; $('uwChips').innerHTML=''; $('uwInput').value='';
     $('uwDesc').value=''; $('uwMsg').value=''; $('uwPublic').checked=false;
@@ -195,7 +303,9 @@ then finalizes shared metadata + recipients in one call.
     $('uwDoneLinks').innerHTML=''; $('uwErr').hidden=true; $('uwOverall').hidden=true;
     $('uwExpiry').value=''; $('uwExpiry').hidden=true; $('uwExpirySel').value='';
     $('uwDoneTitle').textContent='✓ Files sent';
-    $('uwCat').value=''; $('uwNotify').checked=true; goStep(1);
+    $('uwCat').value=''; $('uwNotify').checked=true;
+    if (window.syncSelects) window.syncSelects(m);
+    goStep(1);
   }
   function human(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB';
     if(n<1073741824)return (n/1048576).toFixed(1)+' MB'; return (n/1073741824).toFixed(1)+' GB'; }
@@ -218,10 +328,11 @@ then finalizes shared metadata + recipients in one call.
   }
   function refreshNext(){
     const done = files.filter(f=>f.status==='done').length;
-    const busy = files.some(f=>f.status==='uploading');
+    const busy = files.some(f=>f.status==='uploading'||f.status==='queued');
     if(step===1){ $('uwNext').disabled = done===0 || busy;
       $('uwStatus').textContent = files.length ? `${files.length} file(s) · ${done} uploaded` : 'No files selected'; }
     updateOverall();
+    updateMini();
   }
   // Aggregate progress across all selected files (only shown for multi-file).
   function updateOverall(){
@@ -240,63 +351,242 @@ then finalizes shared metadata + recipients in one call.
   // ---- file selection + upload ----
   $('uwDrop').addEventListener('click', ()=>$('uwInput').click());
   $('uwInput').addEventListener('change', e=>addFiles(e.target.files));
+  // Folder upload (Chromium/Safari): adds every file inside the chosen folder.
+  $('uwFolderBtn').addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); $('uwInputDir').click(); });
+  $('uwInputDir').addEventListener('change', e=>addFiles(e.target.files));
   ['dragover','dragenter'].forEach(ev=>$('uwDrop').addEventListener(ev,e=>{e.preventDefault();$('uwDrop').classList.add('over');}));
   ['dragleave','drop'].forEach(ev=>$('uwDrop').addEventListener(ev,e=>{e.preventDefault();$('uwDrop').classList.remove('over');}));
   $('uwDrop').addEventListener('drop', e=>{ if(e.dataTransfer.files) addFiles(e.dataTransfer.files); });
 
-  function addFiles(list){ for(const f of list){ const rec={file:f,uuid:null,status:'pending',sent:0}; files.push(rec); renderRow(rec); uploadOne(rec); } refreshNext(); }
+  function fileSig(f){ return 'uw:'+f.name+'::'+f.size+'::'+(f.lastModified||0); }
+
+  // Read a response as JSON, but never throw "Unexpected token <" on an HTML
+  // error page (413/500/502 etc.) — return a clean {error} instead.
+  async function readJson(resp){
+    const text = await resp.text();
+    try { return JSON.parse(text); }
+    catch(e){
+      const msg = resp.status === 413 ? 'File too large for the server.'
+        : resp.status === 504 || resp.status === 502 ? 'Server timed out — try again.'
+        : resp.status >= 500 ? 'Server error ('+resp.status+').'
+        : 'Unexpected server response ('+resp.status+').';
+      return {error: msg};
+    }
+  }
+
+  // Upload one file at a time; the rest wait in a queue (like Dropbox).
+  const MAX_CONCURRENT = 1;
+  function activeCount(){ return files.filter(f=>f.status==='uploading').length; }
+  function pump(){
+    while(activeCount() < MAX_CONCURRENT){
+      const next = files.find(f=>f.status==='queued');
+      if(!next) break;
+      next.status='uploading';            // claim the slot before any await
+      setProg(next, pct(next), 'Starting…'); setActions(next);
+      startRec(next);
+    }
+  }
+
+  function addFiles(list){
+    for(const f of list){
+      const rec={file:f,uuid:null,status:'queued',sent:0,token:null,partSize:0,ctrl:null};
+      files.push(rec); renderRow(rec); setProg(rec,0,'Waiting…');
+    }
+    pump(); refreshNext();
+  }
 
   function renderRow(rec){
     const row=document.createElement('div'); row.className='uw-frow'; rec.el=row;
     row.innerHTML = `<div class="ic">${(rec.file.name.split('.').pop()||'?').slice(0,4).toUpperCase()}</div>
       <div class="meta"><div class="nm"><span></span><span class="sz">${human(rec.file.size)}</span></div>
       <div class="uw-bar"><i></i></div><div class="st">Starting…</div></div>
-      <button class="rm" title="Remove">🗑</button>`;
+      <div class="uw-act"></div>`;
     row.querySelector('.nm span').textContent = rec.file.name;
-    row.querySelector('.rm').addEventListener('click', ()=>{ const i=files.indexOf(rec); if(i>-1)files.splice(i,1); row.remove(); refreshNext(); });
     $('uwFiles').appendChild(row);
+    setActions(rec);
   }
-  function setProg(rec,pct,txt){ rec.el.querySelector('.uw-bar i').style.width=pct+'%'; rec.el.querySelector('.st').textContent=txt; updateOverall(); }
+  function setProg(rec,pct,txt){ rec.el.querySelector('.uw-bar i').style.width=pct+'%'; rec.el.querySelector('.st').textContent=txt; updateOverall(); updateMini(); }
+  function pct(rec){ return Math.round((rec.sent/(rec.file.size||1))*100); }
 
-  async function uploadOne(rec){
-    rec.status='uploading'; refreshNext();
+  // Render the per-row action buttons for the current state (Cancel / Retry / Remove).
+  function setActions(rec){
+    const a=rec.el.querySelector('.uw-act'); a.innerHTML='';
+    const mk=(cls,title,html,fn)=>{ const b=document.createElement('button');
+      b.type='button'; b.className=cls; b.title=title; b.innerHTML=html;
+      b.addEventListener('click',fn); a.appendChild(b); return b; };
+    if(rec.status==='queued'){
+      mk('uw-cancel','Cancel','Cancel', ()=>removeRec(rec));
+    } else if(rec.status==='uploading'){
+      mk('uw-cancel','Cancel','Cancel', ()=>pauseRec(rec));
+    } else if(rec.status==='paused' || rec.status==='error'){
+      mk('uw-retry','Retry','↻ Retry', ()=>retryRec(rec));
+      mk('rm','Remove','🗑', ()=>removeRec(rec));
+    } else if(rec.status==='done'){
+      mk('rm','Remove','🗑', ()=>removeRec(rec));
+    }
+  }
+
+  // Decide whether to resume an interrupted upload (same file seen before) or start fresh.
+  async function startRec(rec){
+    // Re-picked resume (from the incomplete-uploads prompt): token + offset known.
+    if(rec.token && rec.sent>0){ return uploadOne(rec, true); }
+    const sig=fileSig(rec.file);
+    const saved=localStorage.getItem(sig);
+    if(saved){
+      try{
+        const st=await readJson(await fetch(U.status+'?token='+encodeURIComponent(saved)));
+        if(st.resumable && st.declared_size===rec.file.size){
+          rec.token=st.token; rec.sent=st.received; rec.partSize=st.part_size;
+          return uploadOne(rec, true);
+        }
+      }catch(e){}
+      localStorage.removeItem(sig);
+    }
+    uploadOne(rec, false);
+  }
+
+  async function uploadOne(rec, resuming){
+    rec.status='uploading'; rec.ctrl=new AbortController(); setActions(rec); refreshNext();
     try{
-      const initResp = await fetch(U.init,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
-        body:JSON.stringify({filename:rec.file.name,size:rec.file.size})});
-      const init = await initResp.json();
-      if(!initResp.ok || init.error){ rec.status='error'; setProg(rec,100,init.error||'Upload rejected'); refreshNext(); return; }
-      const part = init.part_size;
-      let off=0;
-      while(off < rec.file.size){
-        const blob = rec.file.slice(off, off+part);
-        const fd=new FormData(); fd.append('token',init.token); fd.append('chunk',blob);
-        await fetch(U.chunk,{method:'POST',headers:{'X-CSRFToken':U.csrf},body:fd});
-        off += part; rec.sent=Math.min(off,rec.file.size);
-        setProg(rec, Math.min(99,Math.round(rec.sent/rec.file.size*100)), Math.round(rec.sent/rec.file.size*100)+'%');
+      if(!resuming){
+        const initResp=await fetch(U.init,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
+          body:JSON.stringify({filename:rec.file.name,size:rec.file.size})});
+        const init=await readJson(initResp);
+        if(!initResp.ok || init.error){ rec.status='error'; setProg(rec,pct(rec),init.error||'Upload rejected'); setActions(rec); refreshNext(); return; }
+        rec.token=init.token; rec.partSize=init.part_size; rec.sent=0;
+        localStorage.setItem(fileSig(rec.file), rec.token);
       }
-      const fin = await (await fetch(U.complete,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
-        body:JSON.stringify({token:init.token})})).json();
+      const part=rec.partSize;
+      let off=rec.sent;
+      while(off < rec.file.size){
+        const pn=Math.floor(off/part)+1;
+        const blob=rec.file.slice(off, off+part);
+        const fd=new FormData(); fd.append('token',rec.token); fd.append('part_number',pn); fd.append('chunk',blob);
+        const resp=await fetch(U.chunk,{method:'POST',headers:{'X-CSRFToken':U.csrf},body:fd, signal:rec.ctrl.signal});
+        const j=await readJson(resp);
+        if(!resp.ok || j.error){ rec.status='error'; setProg(rec,pct(rec),j.error||('Upload failed ('+resp.status+')')); setActions(rec); refreshNext(); return; }
+        off=(j.received!=null)?j.received:(off+blob.size);
+        rec.sent=Math.min(off, rec.file.size);
+        setProg(rec, Math.min(99,pct(rec)), human(rec.sent)+' / '+human(rec.file.size));
+      }
+      const finResp=await fetch(U.complete,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
+        body:JSON.stringify({token:rec.token})});
+      const fin=await readJson(finResp);
       if(fin.file_uuid){ rec.uuid=fin.file_uuid; rec.status='done'; rec.el.classList.add('done');
-        setProg(rec,100,'Complete'); }
-      else { rec.status='error'; setProg(rec,100,'Error: '+(fin.error||'upload failed')); }
-    }catch(err){ rec.status='error'; setProg(rec,100,'Error: '+err); }
-    refreshNext();
+        setProg(rec,100,'Complete'); localStorage.removeItem(fileSig(rec.file)); }
+      else { rec.status='error'; setProg(rec,pct(rec),'Error: '+(fin.error||'upload failed')); }
+    }catch(err){
+      if(err.name==='AbortError'){ rec.status='paused'; rec.el.classList.remove('done'); setProg(rec,pct(rec),'Canceled · '+human(rec.sent)+' uploaded'); }
+      else { rec.status='error'; setProg(rec,pct(rec),'Error: '+err); }
+    }
+    setActions(rec); refreshNext();
+    pump();  // this slot is free — start the next queued file
   }
 
-  // ---- recipients (chosen from real users/groups) ----
-  function addRecip(val, label){ val=(val||'').trim(); if(!val) return;
-    if(recipients.some(r=>r.val===val)) return; recipients.push({val, label:label||val}); renderChips(); }
-  function renderChips(){ $('uwChips').innerHTML=''; recipients.forEach(r=>{
-    const c=document.createElement('span'); c.className='uw-chip';
-    c.innerHTML = `${r.label} <b>&times;</b>`;
-    c.querySelector('b').addEventListener('click',()=>{ recipients.splice(recipients.indexOf(r),1); renderChips(); });
-    $('uwChips').appendChild(c); }); }
-  function pickFrom(selId, prefix){ const s=$(selId); if(!s||!s.value) return;
-    const label = s.options[s.selectedIndex].textContent.trim();
-    addRecip(s.value, (prefix||'')+label); s.value=''; }
-  // Selecting an option adds it immediately — no separate Add button.
-  $('uwUserSel').addEventListener('change', ()=>pickFrom('uwUserSel'));
-  if($('uwGroupSel')) $('uwGroupSel').addEventListener('change', ()=>pickFrom('uwGroupSel', '👥 '));
+  // Cancel = pause now, keep progress so Retry can resume from where it stopped.
+  function pauseRec(rec){ if(rec.ctrl) rec.ctrl.abort(); }
+  // Retry re-queues so it still uploads one-at-a-time.
+  function retryRec(rec){ rec.status='queued'; setProg(rec, pct(rec), 'Waiting…'); setActions(rec); pump(); }
+  // Remove = abort + server-side cleanup + drop the row entirely.
+  function removeRec(rec){
+    if(rec.ctrl) rec.ctrl.abort();
+    if(rec.token){ fetch(U.cancel,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
+      body:JSON.stringify({token:rec.token})}).catch(()=>{}); }
+    localStorage.removeItem(fileSig(rec.file));
+    const i=files.indexOf(rec); if(i>-1) files.splice(i,1);
+    rec.el.remove(); refreshNext(); pump();  // freed a slot — start the next queued file
+  }
+
+  // ---- resume incomplete uploads (interrupted by reload/crash) ----
+  let pendingResume = null;  // the session row awaiting a re-picked file
+  async function loadIncomplete(){
+    const box=$('uwResume'); box.hidden=true; box.innerHTML='';
+    let data;
+    try{ data=await readJson(await fetch(U.incomplete)); }catch(e){ return; }
+    const items=(data && data.items)||[];
+    if(!items.length) return;
+    box.innerHTML='<div class="uw-resume-h">⏳ Resume incomplete uploads ('+items.length+')</div>';
+    items.forEach(it=>{
+      const pctv=Math.round((it.received/(it.declared_size||1))*100);
+      const row=document.createElement('div'); row.className='uw-rrow';
+      row.innerHTML='<div class="meta"><div class="nm"></div>'+
+        '<div class="sub">'+human(it.received)+' of '+human(it.declared_size)+' uploaded · '+pctv+'%</div></div>'+
+        '<button type="button" class="resume">Resume</button>'+
+        '<button type="button" class="discard">Discard</button>';
+      row.querySelector('.nm').textContent=it.filename;
+      row.querySelector('.resume').addEventListener('click', ()=>{ pendingResume={it,row}; $('uwResumeInput').value=''; $('uwResumeInput').click(); });
+      row.querySelector('.discard').addEventListener('click', ()=>{
+        fetch(U.cancel,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
+          body:JSON.stringify({token:it.token})}).catch(()=>{});
+        row.remove(); if(!box.querySelector('.uw-rrow')) box.hidden=true;
+      });
+      box.appendChild(row);
+    });
+    box.hidden=false;
+  }
+  // User re-picks the file for a session → verify it matches, then resume.
+  $('uwResumeInput').addEventListener('change', e=>{
+    const f=e.target.files[0]; const pr=pendingResume; pendingResume=null;
+    if(!f || !pr) return;
+    if(f.name!==pr.it.filename || f.size!==pr.it.declared_size){
+      alert('That file doesn’t match. Expected "'+pr.it.filename+'" ('+human(pr.it.declared_size)+').');
+      return;
+    }
+    const rec={file:f,uuid:null,status:'queued',sent:pr.it.received,token:pr.it.token,partSize:pr.it.part_size,ctrl:null};
+    files.push(rec); renderRow(rec); setProg(rec, pct(rec), 'Waiting…');
+    localStorage.setItem(fileSig(f), pr.it.token);
+    pr.row.remove(); if(!$('uwResume').querySelector('.uw-rrow')) $('uwResume').hidden=true;
+    pump(); refreshNext();
+  });
+
+  // ---- recipients: searchable people & groups picker ----
+  function recEsc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function recInitials(s){ var t=s.replace(/\(.*$/,'').trim().split(/\s+/); return (((t[0]||'')[0]||'')+((t[1]||'')[0]||'')).toUpperCase(); }
+  function recItems(){
+    var items=[], us=$('uwUserSel'), gs=$('uwGroupSel'), i;
+    if(us) for(i=0;i<us.options.length;i++){ if(us.options[i].value) items.push({type:'user', val:us.options[i].value, label:us.options[i].textContent.trim()}); }
+    if(gs) for(i=0;i<gs.options.length;i++){ if(gs.options[i].value) items.push({type:'group', val:gs.options[i].value, label:gs.options[i].textContent.trim()}); }
+    return items;
+  }
+  var ALL_REC = recItems();
+
+  function addRecip(val, label, type){ val=(val||'').trim(); if(!val) return;
+    if(recipients.some(r=>r.val===val)) return;
+    recipients.push({val, label:label||val, type:type||'user'}); renderChips(); }
+  function renderChips(){ var box=$('uwChips'); box.innerHTML='';
+    recipients.forEach(function(r){
+      var c=document.createElement('span'); c.className='uw-chip';
+      var ini = r.type==='group' ? '#' : recInitials(r.label);
+      c.innerHTML = '<span class="uw-cav '+(r.type==='group'?'grp':'')+'">'+recEsc(ini)+'</span>'+recEsc(r.label)+' <b>&times;</b>';
+      c.querySelector('b').addEventListener('click',function(){ recipients.splice(recipients.indexOf(r),1); renderChips(); if(!$('uwPickList').hidden) renderPickList(); });
+      box.appendChild(c);
+    });
+  }
+  function renderPickList(){
+    var list=$('uwPickList'), q=$('uwPickSearch').value.trim().toLowerCase();
+    var chosen={}; recipients.forEach(function(r){ chosen[r.val]=1; });
+    var items=ALL_REC.filter(function(it){ return !chosen[it.val] && (!q || it.label.toLowerCase().indexOf(q)!==-1); });
+    if(!items.length){ list.innerHTML='<div class="uw-pick-none">'+(q?'No matches':'Everyone added')+'</div>'; list.hidden=false; return; }
+    list.innerHTML = items.slice(0,50).map(function(it){
+      var ini = it.type==='group' ? '#' : recInitials(it.label);
+      return '<button type="button" class="uw-pick-row" data-val="'+recEsc(it.val)+'" data-label="'+recEsc(it.label)+'" data-type="'+it.type+'">'+
+        '<span class="uw-pick-av '+(it.type==='group'?'grp':'')+'">'+recEsc(ini)+'</span>'+
+        '<span class="uw-pick-nm">'+recEsc(it.label)+'</span><span class="uw-pick-plus">+</span></button>';
+    }).join('');
+    list.hidden=false;
+  }
+  (function initRecipPicker(){
+    var search=$('uwPickSearch'), list=$('uwPickList'), picker=$('uwPicker');
+    if(!search) return;
+    search.addEventListener('focus', renderPickList);
+    search.addEventListener('input', renderPickList);
+    list.addEventListener('click', function(e){
+      var row=e.target.closest('[data-val]'); if(!row) return;
+      addRecip(row.dataset.val, row.dataset.label, row.dataset.type);
+      search.value=''; renderPickList(); search.focus();
+    });
+    document.addEventListener('click', function(e){ if(picker && !picker.contains(e.target)) list.hidden=true; });
+  })();
   $('uwPublic').addEventListener('change', e=>{ $('uwPublicOpts').hidden=!e.target.checked; });
   // Expiry: presets, with a custom date option that reveals the date picker.
   $('uwExpirySel').addEventListener('change', e=>{
@@ -332,7 +622,7 @@ then finalizes shared metadata + recipients in one call.
       download_limit:$('uwLimit').value||null };
     try{
       const r = await fetch(U.finalize,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      const d = await r.json();
+      const d = await readJson(r);
       if(!d.ok){ showErr(d.error||'Failed to send.'); $('uwSend').disabled=false; $('uwSend').textContent='Send Files ✓'; return; }
       const links = d.public_links||[];
       $('uwDoneTitle').textContent = links.length
@@ -358,14 +648,53 @@ then finalizes shared metadata + recipients in one call.
     }catch(err){ showErr('Error: '+err); $('uwSend').disabled=false; $('uwSend').textContent='Send Files ✓'; }
   });
 
+  // ---- minimize / restore (Dropbox-style background uploads) ----
+  function uploadsInFlight(){ return files.some(f=>f.status==='uploading'||f.status==='paused'); }
+  function minimize(){ m.hidden=true; $('uwMini').hidden=false; updateMini(); }
+  function restore(){ $('uwMini').hidden=true; m.hidden=false; }
+  function updateMini(){
+    const mini=$('uwMini'); if(!mini || mini.hidden) return;
+    const total=files.reduce((s,f)=>s+f.file.size,0)||1;
+    const sent=files.reduce((s,f)=>s+(f.status==='done'?f.file.size:(f.sent||0)),0);
+    const uploading=files.filter(f=>f.status==='uploading').length;
+    const done=files.filter(f=>f.status==='done').length;
+    const failed=files.filter(f=>f.status==='error'||f.status==='paused').length;
+    const pctv=Math.min(100,Math.round(sent/total*100));
+    $('uwMiniBar').style.width=pctv+'%';
+    if(uploading){ $('uwMiniTitle').textContent='Uploading '+(done+1)+' of '+files.length+' item'+(files.length>1?'s':'');
+      $('uwMiniSub').textContent=human(sent)+' of '+human(total)+' · '+pctv+'%'; }
+    else if(failed){ $('uwMiniTitle').textContent=done+' done · '+failed+' need attention';
+      $('uwMiniSub').textContent='Click to review'; }
+    else { $('uwMiniTitle').textContent='Upload complete'; $('uwMiniSub').textContent='Click to add details & send'; }
+  }
+  // Closing the X minimizes when uploads are still running; otherwise it closes.
+  function closeOrMinimize(){
+    if(step!=='done' && uploadsInFlight()){ minimize(); }
+    else { close(); }
+  }
+  $('uwMinBtn').addEventListener('click', minimize);
+  $('uwMini').addEventListener('click', restore);
+  $('uwMiniClose').addEventListener('click', e=>{ e.stopPropagation();
+    files.slice().forEach(removeRec); $('uwMini').hidden=true; close(); });
+
   // ---- open/close wiring ----
   document.addEventListener('click', e=>{
     const trigger = e.target.closest('[data-uw-open]');
-    if(trigger){ e.preventDefault(); open(trigger.dataset.uwGroup || ''); }
-    if(e.target.closest('[data-uw-close]')){ e.preventDefault(); if(step==='done') window.location=U.mine; else close(); }
-    if(e.target===m) close();
+    if(trigger){ e.preventDefault();
+      // A minimized upload is in progress — bring it back instead of resetting.
+      if(!$('uwMini').hidden){ restore(); }
+      else { open(trigger.dataset.uwGroup || ''); }
+    }
+    if(e.target.closest('[data-uw-close]')){ e.preventDefault(); if(step==='done') window.location=U.mine; else closeOrMinimize(); }
+    if(e.target===m) closeOrMinimize();
   });
-  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !m.hidden) close(); });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !m.hidden) closeOrMinimize(); });
+
+  // Warn before a reload/navigation drops an in-flight upload (the browser
+  // can't resume a transfer after reload without re-selecting the file).
+  window.addEventListener('beforeunload', e=>{
+    if(files.some(f=>f.status==='uploading')){ e.preventDefault(); e.returnValue=''; return ''; }
+  });
 })();
 </script>
 {% endif %}

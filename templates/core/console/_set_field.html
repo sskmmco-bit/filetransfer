@@ -1,0 +1,7 @@
+{% comment %}One settings input. Params: field, optional label override.{% endcomment %}
+<div class="set2-field">
+  <label for="{{ field.id_for_label }}">{{ label|default:field.label }}</label>
+  {{ field }}
+  {% if field.help_text %}<div class="set2-hint">{{ field.help_text }}</div>{% endif %}
+  {% for e in field.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}
+</div>

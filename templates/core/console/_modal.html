@@ -14,13 +14,28 @@ via fetch — JSON {ok,redirect} navigates, a 422 fragment re-renders with error
   const modal = document.getElementById('cmodal');
   const body = document.getElementById('cmodal-body');
   const open = () => { modal.hidden = false; };
-  const close = () => { modal.hidden = true; body.innerHTML = ''; };
+  const close = () => { if (window.closeAllSelects) window.closeAllSelects(); modal.hidden = true; body.innerHTML = ''; };
+
+  // innerHTML doesn't execute <script> tags — re-inject JS ones so fragments
+  // can ship their own behaviour (e.g. the group member picker). JSON data
+  // scripts are left untouched.
+  function setBody(html){
+    body.innerHTML = html;
+    body.querySelectorAll('script').forEach(old => {
+      if (old.type && !/javascript/.test(old.type)) return;
+      const s = document.createElement('script');
+      for (const a of old.attributes) s.setAttribute(a.name, a.value);
+      s.textContent = old.textContent;
+      old.replaceWith(s);
+    });
+    if (window.enhanceSelects) window.enhanceSelects(body);
+  }
 
   async function load(url){
     body.innerHTML = '<div class="cmodal-busy">Loading…</div>';
     open();
     const r = await fetch(url, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
-    body.innerHTML = await r.text();
+    setBody(await r.text());
   }
 
   async function submit(form){
@@ -36,7 +51,7 @@ via fetch — JSON {ok,redirect} navigates, a 422 fragment re-renders with error
       return;
     }
     // 422 (validation errors) or other — re-render the returned fragment.
-    body.innerHTML = await r.text();
+    setBody(await r.text());
   }
 
   document.addEventListener('click', (e) => {

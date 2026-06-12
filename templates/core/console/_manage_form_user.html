@@ -1,0 +1,151 @@
+{% comment %}Redesigned User create/edit form — sectioned, two-column, toggle
+switches, collapsible contact, sticky footer. Rendered inside the console modal
+(see _modal.html). All CSS is inline so it applies when injected via innerHTML.{% endcomment %}
+<style>
+  /* widen + restructure the modal card just for this form */
+  #cmodal .cmodal-card{max-width:900px;padding:0;max-height:88vh;
+    display:flex;flex-direction:column;overflow:hidden;}
+  #cmodal #cmodal-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+
+  .uf{flex:1;min-height:0;display:flex;flex-direction:column;}
+  .uf-head{padding:20px 26px 16px;border-bottom:1px solid var(--line);}
+  .uf-head h2{margin:0;font-size:19px;font-weight:700;}
+  .uf-head .uf-sub{color:var(--muted);font-size:13px;margin-top:3px;}
+  .uf-body{flex:1;min-height:0;overflow-y:auto;padding:20px 26px;}
+  .uf-foot{border-top:1px solid var(--line);padding:14px 26px;background:#fff;
+    display:flex;justify-content:flex-end;gap:10px;}
+
+  .uf-err{background:var(--red-bg);color:#b42318;border:1px solid #f3c9c4;
+    border-radius:10px;padding:10px 13px;font-size:13px;margin-bottom:16px;}
+
+  /* sections */
+  .uf-sec{margin-top:24px;}
+  .uf-sec:first-of-type{margin-top:0;}
+  .uf-sec-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--accent2);margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);}
+
+  /* two-column grid */
+  .uf-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;}
+  .uf-grid .full{grid-column:1/-1;}
+  @media(max-width:680px){.uf-grid{grid-template-columns:1fr;}}
+
+  .uf-field label{display:block;font-size:13px;font-weight:600;color:#3c4a38;margin:0 0 6px;}
+  .uf-field .req{color:var(--red);margin-left:2px;}
+  .uf input,.uf select,.uf textarea{width:100%;padding:11px 13px;border:1px solid #d4ddca;
+    border-radius:10px;font-size:14px;background:#fff;color:var(--ink);}
+  .uf input:focus,.uf select:focus,.uf textarea:focus{outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-soft);}
+  .uf .uf-hint{color:var(--muted);font-size:12px;margin-top:5px;}
+  .uf .errorlist{color:var(--red);font-size:12px;margin-top:5px;list-style:none;padding:0;}
+
+  /* toggle rows */
+  .tog-row{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:12px 0;border-bottom:1px solid #f0f3ec;}
+  .tog-row:last-child{border-bottom:0;}
+  .tog-name{font-weight:600;font-size:14px;color:var(--ink);}
+  .tog-sub{color:var(--muted);font-size:12px;margin-top:2px;}
+  .switch{position:relative;display:inline-block;width:42px;height:24px;flex:none;}
+  .switch input{position:absolute;opacity:0;width:0;height:0;margin:0;}
+  .switch .slider{position:absolute;inset:0;background:#cfd8c8;border-radius:999px;
+    transition:.18s;cursor:pointer;}
+  .switch .slider:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;
+    background:#fff;border-radius:50%;transition:.18s;box-shadow:0 1px 2px rgba(0,0,0,.2);}
+  .switch input:checked + .slider{background:var(--accent);}
+  .switch input:checked + .slider:before{transform:translateX(18px);}
+  .switch input:focus-visible + .slider{box-shadow:0 0 0 3px var(--accent-soft);}
+
+  /* collapsible section */
+  .uf-collapse{margin-top:24px;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  .uf-collapse > summary{list-style:none;cursor:pointer;padding:14px 16px;font-size:12px;
+    font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent2);
+    display:flex;align-items:center;justify-content:space-between;background:#f7faf4;}
+  .uf-collapse > summary::-webkit-details-marker{display:none;}
+  .uf-collapse > summary .chev{transition:transform .18s;}
+  .uf-collapse[open] > summary .chev{transform:rotate(180deg);}
+  .uf-collapse .uf-collapse-body{padding:16px;}
+</style>
+
+<form class="uf" method="post" data-cform
+      action="{% if form.instance.pk %}{% url 'core:manage_edit' key=resource.key pk=form.instance.pk %}{% else %}{% url 'core:manage_new' key=resource.key %}{% endif %}">
+  {% csrf_token %}
+
+  <div class="uf-head">
+    <h2>{% if form.instance.pk %}Edit User{% else %}Create New User{% endif %}</h2>
+    <div class="uf-sub">{% if form.instance.pk %}Update account details, access and storage.{% else %}Set up a new account, its access level and storage.{% endif %}</div>
+  </div>
+
+  <div class="uf-body">
+    {% if form.non_field_errors %}<div class="uf-err">{{ form.non_field_errors }}</div>{% endif %}
+
+    {# ---------- User Information ---------- #}
+    <div class="uf-sec">
+      <h3 class="uf-sec-h">User Information</h3>
+      <div class="uf-grid">
+        {% with f=form.username %}<div class="uf-field"><label for="{{ f.id_for_label }}">Username{% if f.field.required %}<span class="req">*</span>{% endif %}</label>{{ f }}{% if f.help_text %}<div class="uf-hint">{{ f.help_text }}</div>{% endif %}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+        {% with f=form.email %}<div class="uf-field"><label for="{{ f.id_for_label }}">Email{% if f.field.required %}<span class="req">*</span>{% endif %}</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+
+        {% with f=form.first_name %}<div class="uf-field"><label for="{{ f.id_for_label }}">First Name{% if f.field.required %}<span class="req">*</span>{% endif %}</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+        {% with f=form.last_name %}<div class="uf-field"><label for="{{ f.id_for_label }}">Last Name{% if f.field.required %}<span class="req">*</span>{% endif %}</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+
+        {% with f=form.employee_id %}<div class="uf-field"><label for="{{ f.id_for_label }}">Employee ID</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+        {% with f=form.role %}<div class="uf-field"><label for="{{ f.id_for_label }}">Role{% if f.field.required %}<span class="req">*</span>{% endif %}</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+
+        {% with f=form.auth_source %}<div class="uf-field full"><label for="{{ f.id_for_label }}">Authentication Method{% if f.field.required %}<span class="req">*</span>{% endif %}</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+      </div>
+    </div>
+
+    {# ---------- Permissions ---------- #}
+    <div class="uf-sec">
+      <h3 class="uf-sec-h">Permissions &amp; Access</h3>
+      <div class="tog-row">
+        <div><div class="tog-name">Active User</div><div class="tog-sub">User can sign in and use the app. Turn off to disable instead of deleting.</div></div>
+        <label class="switch">{{ form.is_active }}<span class="slider"></span></label>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-name">Admin Access</div><div class="tog-sub">Can log into the Django admin site.</div></div>
+        <label class="switch">{{ form.is_staff }}<span class="slider"></span></label>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-name">Allow Public File Uploads</div><div class="tog-sub">May share files with a public link.</div></div>
+        <label class="switch">{{ form.can_upload_public }}<span class="slider"></span></label>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-name">Force Password Change</div><div class="tog-sub">Require a new password at next login.</div></div>
+        <label class="switch">{{ form.must_change_password }}<span class="slider"></span></label>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-name">Email Notifications</div><div class="tog-sub">Notify when files are shared with this user.</div></div>
+        <label class="switch">{{ form.notify_on_assignment }}<span class="slider"></span></label>
+      </div>
+    </div>
+
+    {# ---------- Contact (collapsed by default) ---------- #}
+    <details class="uf-collapse">
+      <summary>
+        Contact Information
+        <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="uf-collapse-body">
+        <div class="uf-grid">
+          {% with f=form.phone %}<div class="uf-field"><label for="{{ f.id_for_label }}">Phone</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+          {% with f=form.contact %}<div class="uf-field"><label for="{{ f.id_for_label }}">Emergency Contact</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+          {% with f=form.address %}<div class="uf-field full"><label for="{{ f.id_for_label }}">Address</label>{{ f }}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+        </div>
+      </div>
+    </details>
+
+    {# ---------- Storage & Security ---------- #}
+    <div class="uf-sec">
+      <h3 class="uf-sec-h">Storage &amp; Security</h3>
+      <div class="uf-grid">
+        {% with f=form.quota_gb %}<div class="uf-field"><label for="{{ f.id_for_label }}">Storage Quota (GB)</label>{{ f }}{% if f.help_text %}<div class="uf-hint">{{ f.help_text }}</div>{% endif %}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+        {% with f=form.new_password %}<div class="uf-field"><label for="{{ f.id_for_label }}">Password</label>{{ f }}{% if f.help_text %}<div class="uf-hint">{{ f.help_text }}</div>{% endif %}{% for e in f.errors %}<div class="errorlist">{{ e }}</div>{% endfor %}</div>{% endwith %}
+      </div>
+    </div>
+  </div>
+
+  <div class="uf-foot">
+    <a data-cancel href="{% url 'core:manage_list' key=resource.key %}" class="btn btn-ghost btn-sm">Cancel</a>
+    <button type="submit" class="btn btn-sm">{% if form.instance.pk %}Save Changes{% else %}Create User{% endif %}</button>
+  </div>
+</form>

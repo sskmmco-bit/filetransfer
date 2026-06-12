@@ -8,10 +8,18 @@
   <div class="sub">Files shared directly with you or your groups · {{ page.paginator.count }} total</div>
 </div>
 
-<div class="card" style="margin-top:18px;">
+<div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
   {% if assignments %}
+  <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+    {% include "files/_view_toggle.html" %}
+  </div>
   <form method="post" action="{% url 'files:download_zip' %}">
     {% csrf_token %}
+    {% if view == 'grid' %}
+    <div class="file-grid">
+      {% for a in assignments %}{% include "files/_file_card.html" with f=a.stored_file selectable=True %}{% endfor %}
+    </div>
+    {% else %}
     <div class="flist">
       {% for a in assignments %}
       {% with f=a.stored_file %}
@@ -40,6 +48,7 @@
       {% endwith %}
       {% endfor %}
     </div>
+    {% endif %}
     <div class="flist-bulk">
       <button type="submit" class="btn-ghost">⬇ Download selected as ZIP</button>
     </div>

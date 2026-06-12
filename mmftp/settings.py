@@ -159,7 +159,20 @@ STORAGES = {
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Source static files (project-level). Equivalent of Next.js's public/ folder —
+# put images, fonts, etc. here. collectstatic gathers these into STATIC_ROOT.
+STATICFILES_DIRS = [BASE_DIR / "static"]
 MEDIA_URL = "media/"
+
+# ---------------------------------------------------------------------------
+# Uploads — large/chunked transfers
+# ---------------------------------------------------------------------------
+# Chunks are file fields (streamed to temp, exempt from the data-size cap), but
+# raise the non-file POST cap and remove the field-count cap so the chunked
+# uploader is never rejected with a 400/413 HTML page.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 64 * 1024 * 1024
+DATA_UPLOAD_MAX_NUMBER_FIELDS = None
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # spill to a temp file beyond this
 
 # ---------------------------------------------------------------------------
 # Auth

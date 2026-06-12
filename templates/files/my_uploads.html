@@ -14,13 +14,27 @@
   </button>
 </div>
 
-<div class="card" style="margin-top:18px;">
+<div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
   {% if files %}
-  <form method="post" action="{% url 'files:download_zip' %}">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+    {% include "files/_view_toggle.html" %}
+  </div>
+  <form method="post" action="{% url 'files:download_zip' %}" id="filesForm">
     {% csrf_token %}
+    <div class="flist-actionbar" id="bulkBar" hidden>
+      <span id="bulkCount">0 selected</span>
+      <span style="flex:1;"></span>
+      <button type="submit" id="zipBtn" class="btn-ghost btn-sm" formaction="{% url 'files:download_zip' %}">⬇ Download ZIP</button>
+      <button type="submit" id="bulkDelBtn" class="btn-danger btn-sm" formaction="{% url 'files:bulk_delete' %}">🗑 Delete selected</button>
+    </div>
+    {% if view == 'grid' %}
+    <div class="file-grid">
+      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True can_delete=True %}{% endfor %}
+    </div>
+    {% else %}
     <div class="flist">
       <div class="flist-head">
-        <span>Name</span>
+        <span style="display:flex;align-items:center;gap:12px;"><input type="checkbox" id="selAll" class="fcheck" title="Select all"> Name</span>
         <span>Access</span>
         <span class="h-size">Size</span>
         <span class="h-date">Created</span>
@@ -62,9 +76,7 @@
       </div>
       {% endfor %}
     </div>
-    <div class="flist-bulk">
-      <button type="submit" class="btn-ghost">⬇ Download selected as ZIP</button>
-    </div>
+    {% endif %}
   </form>
   {% include "files/_pager.html" %}
   {% else %}
@@ -79,11 +91,52 @@
 <form id="delForm" method="post" style="display:none;">{% csrf_token %}</form>
 <script>
 (function(){
-  document.querySelectorAll('.js-del').forEach(b=>b.addEventListener('click',()=>{
-    if(confirm('Delete "'+b.dataset.name+'"? This cannot be undone.')){
-      const f=document.getElementById('delForm'); f.action=b.dataset.url; f.submit();
+  var form = document.getElementById('filesForm');
+  if(!form) return;
+  var selAll = document.getElementById('selAll');
+  var boxes = Array.prototype.slice.call(form.querySelectorAll('.fcheck[name="uuids"]'));
+  var countEl = document.getElementById('bulkCount');
+  var bulkBar = document.getElementById('bulkBar');
+  var delBtn = document.getElementById('bulkDelBtn');
+
+  function selectedCount(){ return boxes.filter(function(b){return b.checked;}).length; }
+  function update(){
+    var n = selectedCount();
+    bulkBar.hidden = (n === 0);              // only show the bar when something is selected
+    countEl.textContent = n + ' selected';
+    if (selAll){                            // select-all only exists in list view
+      selAll.checked = n > 0 && n === boxes.length;
+      selAll.indeterminate = n > 0 && n < boxes.length;
     }
-  }));
+  }
+  if (selAll) selAll.addEventListener('change', function(){ boxes.forEach(function(b){ b.checked = selAll.checked; }); update(); });
+  boxes.forEach(function(b){ b.addEventListener('change', update); });
+
+  // Bulk delete — confirm via modal, then POST to bulk-delete.
+  delBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    var n = selectedCount(); if(!n) return;
+    confirmAction({
+      title: 'Delete ' + n + ' file' + (n > 1 ? 's' : '') + '?',
+      message: 'The selected file' + (n > 1 ? 's' : '') + ' will be removed. This cannot be undone.',
+      confirmLabel: 'Delete', danger: true,
+      onConfirm: function(){ form.action = delBtn.getAttribute('formaction'); form.submit(); }
+    });
+  });
+
+  // Single delete — confirm via modal.
+  document.querySelectorAll('.js-del').forEach(function(b){
+    b.addEventListener('click', function(){
+      confirmAction({
+        title: 'Delete file?',
+        message: 'Delete "' + b.dataset.name + '"? This cannot be undone.',
+        confirmLabel: 'Delete', danger: true,
+        onConfirm: function(){ var f = document.getElementById('delForm'); f.action = b.dataset.url; f.submit(); }
+      });
+    });
+  });
+
+  update();
 })();
 </script>
 {% endblock %}
