@@ -32,7 +32,8 @@
   /* modern action cards (replaces 80s link lists) */
   .acards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
   .acard{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--line);
-    border-radius:13px;background:#fff;transition:.14s;color:var(--ink);}
+    border-radius:13px;background:#fff;transition:.14s;color:var(--ink);text-decoration:none;}
+  .acard:hover,.acard:hover .nm,.acard:hover .ds{text-decoration:none;}
   .acard:hover{border-color:var(--accent);box-shadow:0 6px 18px rgba(99,102,241,.12);transform:translateY(-1px);}
   .acard .ic{width:38px;height:38px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;
     background:var(--accent-soft);color:var(--accent2);}

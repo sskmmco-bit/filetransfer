@@ -15,83 +15,15 @@
 </div>
 
 <div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+    {% include "files/_searchbar.html" %}
+    <span style="flex:1;"></span>
     {% include "files/_filter_bar.html" %}
     {% include "files/_view_toggle.html" %}
   </div>
-  {% if files %}
-  <form method="post" action="{% url 'files:download_zip' %}" id="filesForm">
-    {% csrf_token %}
-    <div class="flist-actionbar" id="bulkBar" hidden>
-      <span id="bulkCount">0 selected</span>
-      <span style="flex:1;"></span>
-      <button type="button" id="bulkShareBtn" class="btn-sm">↗ Share selected</button>
-      <button type="submit" id="zipBtn" class="btn-ghost btn-sm" formaction="{% url 'files:download_zip' %}">⬇ Download ZIP</button>
-      <button type="submit" id="bulkDelBtn" class="btn-danger btn-sm" formaction="{% url 'files:bulk_delete' %}">🗑 Move to trash</button>
-    </div>
-    {% if view == 'grid' %}
-    <div class="file-grid">
-      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True can_delete=True can_share=True %}{% endfor %}
-    </div>
-    {% else %}
-    <div class="flist">
-      <div class="flist-head">
-        <span style="display:flex;align-items:center;gap:12px;"><input type="checkbox" id="selAll" class="fcheck" title="Select all"> Name</span>
-        <span>Access</span>
-        <span class="h-size">Size</span>
-        <span class="h-date">Created</span>
-      </div>
-      {% for f in files %}
-      <div class="frow">
-        <div class="fmain">
-          <input type="checkbox" name="uuids" value="{{ f.uuid }}" class="fcheck" title="Select">
-          <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
-          <div class="fmeta">
-            <a class="fname" href="{% url 'files:detail' uuid=f.uuid %}">{{ f.display_name }}</a>
-            <div class="fsub">
-              {% if f.status == 'active' %}{{ f.download_count }} download{{ f.download_count|pluralize }}{% if f.expiry_date %} · expires {{ f.expiry_date|date:"M j" }}{% endif %}{% else %}{{ f.get_status_display }}{% endif %}
-            </div>
-          </div>
-          <div class="factions">
-            {% include "files/_star_btn.html" %}
-            {% if f.status == 'active' %}
-            <button type="button" class="iaction js-share-one" data-uuid="{{ f.uuid }}" title="Share">
-              <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg></button>
-            {% endif %}
-            {% if f|previewable %}
-            <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
-              <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
-            {% endif %}
-            {% if f.status == 'active' %}
-            <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
-              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
-            {% endif %}
-            <button type="button" class="iaction danger js-del" data-url="{% url 'files:delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
-              <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
-          </div>
-        </div>
-        <div>
-          {% with acc=f|faccess %}
-          {% if acc == 'pub' %}<span class="fbadge pub">● Public</span>
-          {% elif acc == 'team' %}<span class="fbadge team">● Shared</span>
-          {% else %}<span class="fbadge priv">● Private</span>{% endif %}
-          {% endwith %}
-        </div>
-        <div class="fsize">{{ f.size|filesizeformat }}</div>
-        <div class="fdate">{{ f.created_at|date:"M j, Y" }}</div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  </form>
-  {% include "files/_pager.html" %}
-  {% else %}
-  <div class="fempty">
-    <div class="big">📂</div>
-    <p>You haven't uploaded any files yet.</p>
-    <button type="button" class="btn" data-uw-open style="margin-top:6px;">Upload your first file</button>
+  <div data-results>
+    {% include "files/_results_uploads.html" %}
   </div>
-  {% endif %}
 </div>
 
 <form id="delForm" method="post" style="display:none;">{% csrf_token %}</form>
@@ -191,56 +123,66 @@
 
 <script>
 (function(){
-  var form = document.getElementById('filesForm');
-  if(!form) return;
-  var selAll = document.getElementById('selAll');
-  var boxes = Array.prototype.slice.call(form.querySelectorAll('.fcheck[name="uuids"]'));
-  var countEl = document.getElementById('bulkCount');
-  var bulkBar = document.getElementById('bulkBar');
-  var delBtn = document.getElementById('bulkDelBtn');
+  // The file list (#filesForm and its rows) is re-rendered in place by the
+  // debounced search, so nothing here may cache row/form elements at load time.
+  // Selection, delete and share use document-delegated handlers + live lookups
+  // so they keep working after every AJAX swap.
+  function form(){ return document.getElementById('filesForm'); }
+  function boxes(){ var f=form(); return f ? Array.prototype.slice.call(f.querySelectorAll('.fcheck[name="uuids"]')) : []; }
+  function selectedCount(){ return boxes().filter(function(b){return b.checked;}).length; }
+  function selectedUuids(){ return boxes().filter(function(b){return b.checked;}).map(function(b){return b.value;}); }
 
-  function selectedCount(){ return boxes.filter(function(b){return b.checked;}).length; }
   function update(){
     var n = selectedCount();
-    bulkBar.hidden = (n === 0);              // only show the bar when something is selected
-    countEl.textContent = n + ' selected';
-    if (selAll){                            // select-all only exists in list view
-      selAll.checked = n > 0 && n === boxes.length;
-      selAll.indeterminate = n > 0 && n < boxes.length;
+    var bulkBar = document.getElementById('bulkBar');
+    var countEl = document.getElementById('bulkCount');
+    var selAll = document.getElementById('selAll');
+    if (bulkBar) bulkBar.hidden = (n === 0);   // only show the bar when something is selected
+    if (countEl) countEl.textContent = n + ' selected';
+    if (selAll){                               // select-all only exists in list view
+      var all = boxes();
+      selAll.checked = n > 0 && n === all.length;
+      selAll.indeterminate = n > 0 && n < all.length;
     }
   }
-  if (selAll) selAll.addEventListener('change', function(){ boxes.forEach(function(b){ b.checked = selAll.checked; }); update(); });
-  boxes.forEach(function(b){ b.addEventListener('change', update); });
+  // After a search swaps in fresh (unchecked) rows, reset the selection bar.
+  document.addEventListener('filelist:updated', update);
 
-  // Bulk delete — confirm via modal, then POST to bulk-delete.
-  delBtn.addEventListener('click', function(e){
+  // Selection (delegated): select-all + per-row checkboxes.
+  document.addEventListener('change', function(e){
+    var t = e.target;
+    if (t.id === 'selAll'){ boxes().forEach(function(b){ b.checked = t.checked; }); update(); return; }
+    if (t.classList && t.classList.contains('fcheck') && t.name === 'uuids') update();
+  });
+
+  // Bulk delete (delegated) — confirm via modal, then POST to bulk-delete.
+  document.addEventListener('click', function(e){
+    var del = e.target.closest('#bulkDelBtn'); if(!del) return;
     e.preventDefault();
     var n = selectedCount(); if(!n) return;
     confirmAction({
       title: 'Move ' + n + ' file' + (n > 1 ? 's' : '') + ' to trash?',
       message: 'The selected file' + (n > 1 ? 's' : '') + ' will be moved to the trash. An administrator can restore ' + (n > 1 ? 'them' : 'it') + ' or delete ' + (n > 1 ? 'them' : 'it') + ' permanently.',
       confirmLabel: 'Move to trash', danger: true,
-      onConfirm: function(){ form.action = delBtn.getAttribute('formaction'); form.submit(); }
+      onConfirm: function(){ var f = form(); if(!f) return; f.action = del.getAttribute('formaction'); f.submit(); }
     });
   });
 
-  // Single delete — confirm via modal.
-  document.querySelectorAll('.js-del').forEach(function(b){
-    b.addEventListener('click', function(){
-      confirmAction({
-        title: 'Move to trash?',
-        message: 'Move "' + b.dataset.name + '" to the trash? An administrator can restore it or delete it permanently.',
-        confirmLabel: 'Move to trash', danger: true,
-        onConfirm: function(){ var f = document.getElementById('delForm'); f.action = b.dataset.url; f.submit(); }
-      });
+  // Single delete (delegated) — confirm via modal.
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('.js-del'); if(!b) return;
+    var f = form(); if(!f || !f.contains(b)) return;   // only this page's rows
+    confirmAction({
+      title: 'Move to trash?',
+      message: 'Move "' + b.dataset.name + '" to the trash? An administrator can restore it or delete it permanently.',
+      confirmLabel: 'Move to trash', danger: true,
+      onConfirm: function(){ var df = document.getElementById('delForm'); df.action = b.dataset.url; df.submit(); }
     });
   });
 
-  // ---- Bulk share ----
+  // ---- Bulk share ---- (modal is static, outside the swapped region)
   var bsModal=document.getElementById('bulkShareModal');
-  var shareBtn=document.getElementById('bulkShareBtn');
-  var csrf=(form.querySelector('[name=csrfmiddlewaretoken]')||{}).value || '';
-  function selectedUuids(){ return boxes.filter(function(b){return b.checked;}).map(function(b){return b.value;}); }
+  var csrf=window.CSRF || '';
 
   // people/groups chip picker (same UX as the upload wizard)
   function bsEsc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -302,13 +244,14 @@
     bsModal.hidden=false;
   }
   function bsClose(){ bsModal.hidden=true; }
-  if(shareBtn) shareBtn.addEventListener('click', bsOpen);
-  // Per-row "Share" (hover action) → select just that file, then open the modal.
-  document.querySelectorAll('.js-share-one').forEach(function(b){
-    b.addEventListener('click', function(){
-      boxes.forEach(function(x){ x.checked = (x.value === b.dataset.uuid); });
-      update(); bsOpen();
-    });
+  // "Share selected" + per-row "Share" both live inside the swapped list, so
+  // they're delegated. Per-row share first selects just that one file.
+  document.addEventListener('click', function(e){
+    if(e.target.closest('#bulkShareBtn')){ bsOpen(); return; }
+    var b=e.target.closest('.js-share-one'); if(!b) return;
+    var f=form(); if(!f || !f.contains(b)) return;
+    boxes().forEach(function(x){ x.checked = (x.value === b.dataset.uuid); });
+    update(); bsOpen();
   });
   document.getElementById('bsClose').addEventListener('click', bsClose);
   document.getElementById('bsCancel').addEventListener('click', function(){ bsClose(); if(document.getElementById('bsResult').dataset.shared) location.reload(); });

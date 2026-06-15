@@ -165,14 +165,23 @@ class User(AbstractUser):
 
     # ----- Storage quota (§quota) -----
     def storage_used_bytes(self) -> int:
-        """Total bytes of this user's non-deleted files (their own uploads)."""
+        """Bytes counted against this user's quota — their own live files.
+
+        Excludes TRASHED as well as DELETED: once a user sends a file to trash
+        they've relinquished it (it leaves their lists, public links stop
+        resolving, and only an admin can restore or purge it), so it must not
+        keep burning their quota. The trashed object still occupies real disk
+        until purged — that's the admin's system-storage concern, not the
+        user's quota. ACTIVE + in-flight drafts (PENDING_METADATA/UPLOADING)
+        still count so trash/draft churn can't be used to dodge the limit.
+        """
         from django.db.models import Sum
 
         from apps.files.models import FileStatus, StoredFile
 
         return (
             StoredFile.objects.filter(owner=self)
-            .exclude(status=FileStatus.DELETED)
+            .exclude(status__in=[FileStatus.TRASHED, FileStatus.DELETED])
             .aggregate(s=Sum("size"))["s"]
             or 0
         )

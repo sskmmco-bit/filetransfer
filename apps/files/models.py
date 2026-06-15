@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
@@ -125,6 +126,19 @@ class StoredFile(models.Model):
         indexes = [
             models.Index(fields=["owner", "status"]),
             models.Index(fields=["status", "created_at"]),
+            # Trigram GIN indexes so the file-search ILIKE '%term%' on the two
+            # identifying columns is index-assisted (not a sequential scan).
+            # Requires the pg_trgm extension (created in migration 0011).
+            GinIndex(
+                name="file_fname_trgm",
+                fields=["original_filename"],
+                opclasses=["gin_trgm_ops"],
+            ),
+            GinIndex(
+                name="file_title_trgm",
+                fields=["title"],
+                opclasses=["gin_trgm_ops"],
+            ),
         ]
 
     def __str__(self):

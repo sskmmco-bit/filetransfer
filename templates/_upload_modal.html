@@ -17,6 +17,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     display:flex;align-items:center;justify-content:center;line-height:1;padding:0;}
   .uw-x:hover{background:#e7eaf3;color:var(--ink);}
   .uw-steps{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);}
+  .uw-steps[hidden]{display:none;}
   .uw-step{display:flex;align-items:center;gap:6px;}
   .uw-step i{width:20px;height:20px;border-radius:50%;background:#e7eaf3;color:var(--muted);
     display:flex;align-items:center;justify-content:center;font-style:normal;font-size:12px;font-weight:600;}
@@ -101,6 +102,24 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
   .uw-foot{display:flex;align-items:center;gap:10px;padding:16px 24px;border-top:1px solid var(--line);}
   .uw-foot .spacer{flex:1;}
   .uw-done{font-size:20px;font-weight:700;color:var(--green);margin-bottom:8px;}
+  /* celebratory success state (shown after files are saved/sent) */
+  .uw-success{text-align:center;padding:14px 8px 4px;}
+  .uw-success-ic{width:74px;height:74px;border-radius:50%;margin:0 auto 16px;
+    display:flex;align-items:center;justify-content:center;font-size:40px;line-height:1;color:#fff;
+    background:linear-gradient(135deg,var(--green),#059669);
+    box-shadow:0 12px 28px rgba(5,150,105,.34);animation:uwpop .38s cubic-bezier(.18,.89,.32,1.28);}
+  @keyframes uwpop{0%{transform:scale(.4);opacity:0;}100%{transform:scale(1);opacity:1;}}
+  .uw-success-t{font-size:23px;font-weight:700;color:var(--ink);}
+  .uw-success-count{font-size:14px;color:var(--muted);margin-top:5px;}
+  .uw-success-sum{margin:20px auto 0;max-width:400px;border:1px solid var(--line);
+    border-radius:12px;padding:6px 16px;background:#fafbf7;text-align:left;}
+  .uw-sum-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;
+    padding:9px 0;border-top:1px solid var(--line);}
+  .uw-sum-row:first-child{border-top:0;}
+  .uw-sum-row .k{color:var(--muted);}
+  .uw-sum-row .v{font-weight:600;color:var(--ink);text-align:right;}
+  .uw-success-note{font-size:12.5px;color:var(--muted);margin:14px auto 0;max-width:400px;
+    display:flex;align-items:center;justify-content:center;gap:7px;line-height:1.45;}
   .uw-link{border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-top:10px;background:#fafbff;}
   .uw-link .nm{font-size:13px;font-weight:600;margin-bottom:8px;}
   .uw-link .urlrow{display:flex;gap:8px;}
@@ -330,9 +349,14 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       </section>
 
       <section data-panel="done" hidden>
-        <div class="uw-done" id="uwDoneTitle">✓ Files sent</div>
-        <div class="hint" id="uwDoneMsg"></div>
-        <div id="uwDoneLinks" style="margin-top:14px;"></div>
+        <div class="uw-success">
+          <div class="uw-success-ic" id="uwDoneIcon">✓</div>
+          <div class="uw-success-t" id="uwDoneTitle">Upload Complete</div>
+          <div class="uw-success-count" id="uwDoneCount"></div>
+          <div class="uw-success-sum" id="uwDoneSum" hidden></div>
+          <div class="uw-success-note" id="uwDoneNote" hidden></div>
+        </div>
+        <div id="uwDoneLinks" style="margin-top:18px;"></div>
       </section>
     </div>
 
@@ -343,6 +367,8 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       <button type="button" class="btn btn-ghost" id="uwBack" hidden>Back</button>
       <button type="button" class="btn" id="uwNext" disabled>Next: Details</button>
       <button type="button" class="btn" id="uwSend" hidden style="background:linear-gradient(135deg,#10b981,#059669);">Send Files ✓</button>
+      <button type="button" class="btn btn-ghost" id="uwUploadMore" hidden>Upload more</button>
+      <button type="button" class="btn" id="uwViewFiles" hidden style="background:linear-gradient(135deg,#10b981,#059669);">View files</button>
     </div>
   </div>
 </div>
@@ -466,7 +492,10 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     if(usersRadio) usersRadio.checked = true;
     $('uwDoneLinks').innerHTML=''; $('uwErr').hidden=true;
     $('uwExpiry').value=''; $('uwExpiry').hidden=true; $('uwExpirySel').value='';
-    $('uwDoneTitle').textContent='✓ Files sent';
+    $('uwDoneTitle').textContent='Upload Complete';
+    $('uwDoneCount').textContent='';
+    $('uwDoneSum').innerHTML=''; $('uwDoneSum').hidden=true;
+    $('uwDoneNote').textContent=''; $('uwDoneNote').hidden=true;
     $('uwCat').value=''; $('uwNotify').checked=true;
     ['uwVerify','uwRestrict','uwPreviewOnly','uwPwdToggle','uwLimitToggle','uwPubExpToggle'].forEach(id=>{ if($(id)) $(id).checked=false; });
     if($('uwPwd')) $('uwPwd').value=''; if($('uwLimit')) $('uwLimit').value=''; if($('uwEmails')) $('uwEmails').value='';
@@ -487,6 +516,10 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     $('uwBack').hidden = !(n===2||n===3);
     $('uwNext').hidden = !(n===1||n===2);
     $('uwSend').hidden = n!==3;
+    $('uwUploadMore').hidden = n!=='done';
+    $('uwViewFiles').hidden = n!=='done';
+    // The wizard steps are no longer relevant once the upload is finished.
+    const stepsEl = m.querySelector('.uw-steps'); if(stepsEl) stepsEl.hidden = (n==='done');
     $('uwCancel').textContent = n==='done' ? 'Close' : 'Cancel';
     if(n===1) $('uwNext').textContent='Next: Details';
     if(n===2) $('uwNext').textContent='Next: Recipients';
@@ -672,6 +705,9 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
   // ---- nav ----
   $('uwNext').addEventListener('click', ()=>{ if(step===1) goStep(2); else if(step===2) goStep(3); });
   $('uwBack').addEventListener('click', ()=>{ goStep(step===3?2:1); });
+  // Done-state actions: jump to My Files, or reset for a fresh upload.
+  $('uwViewFiles').addEventListener('click', ()=>{ window.location=U.mine; });
+  $('uwUploadMore').addEventListener('click', ()=>{ reset(); });
 
   function showErr(msg){ const e=$('uwErr'); e.textContent=msg; e.hidden=false; }
 
@@ -748,18 +784,42 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       const d = await readJson(r);
       if(!d.ok){ showErr(d.error||'Failed to send.'); $('uwSend').disabled=false; updateSendLabel(); return; }
       const links = d.public_links||[];
-      const sentToPeople = recipients.length > 0;
+      const n = d.activated;
+      const sharedWithPeople = mode === 'users' && recipients.length > 0;
+      const fileWord = n === 1 ? 'File' : 'Files';
+
+      // Headline + per-context summary rows under the success icon.
+      let title, countTxt;
+      const rows = [];
       if(links.length){
-        $('uwDoneTitle').textContent = links.length>1 ? '✓ Public links created' : '✓ Public link created';
-      } else if(sentToPeople){
-        $('uwDoneTitle').textContent = '✓ Files sent';
+        title = 'Upload Complete';
+        countTxt = `${n} ${fileWord} ready to share`;
+        rows.push(['Shared via', links.length>1 ? links.length+' public links' : 'Public link']);
+        rows.push(['Saved to', 'My Files']);
+      } else if(sharedWithPeople){
+        title = 'Files Sent';
+        countTxt = `${n} ${fileWord} sent successfully`;
+        rows.push(['Shared with', recipients.length + (recipients.length===1?' recipient':' recipients')]);
+        rows.push(['Saved to', 'My Files']);
       } else {
-        $('uwDoneTitle').textContent = '✓ Files saved';
+        title = 'Upload Complete';
+        countTxt = `${n} ${fileWord} Uploaded Successfully`;
+        rows.push(['Saved to', 'My Files']);
       }
-      const verb = links.length ? 'ready to share' : (sentToPeople ? 'sent' : 'saved to My Files');
-      let msg = `${d.activated} file(s) ${verb}`;
-      if(d.unresolved && d.unresolved.length) msg += ` · skipped unknown recipients: ${d.unresolved.join(', ')}`;
-      $('uwDoneMsg').textContent = msg;
+      $('uwDoneTitle').textContent = title;
+      $('uwDoneCount').textContent = countTxt;
+      const sum = $('uwDoneSum');
+      sum.innerHTML = rows.map(r=>`<div class="uw-sum-row"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join('');
+      sum.hidden = false;
+
+      // A plain note about visibility / what just happened — prevents "did it share?" confusion.
+      let noteTxt;
+      if(links.length){ noteTxt = '🔗 Anyone with the link can access these files.'; }
+      else if(sharedWithPeople){ noteTxt = $('uwNotify').checked ? '✉ Recipients were notified by email.' : '🔒 Recipients can now find these in their shared files.'; }
+      else { noteTxt = '🔒 No recipients were selected — these files are private and visible only to you.'; }
+      if(d.unresolved && d.unresolved.length) noteTxt += ` Skipped unknown recipients: ${d.unresolved.join(', ')}.`;
+      const note = $('uwDoneNote'); note.textContent = noteTxt; note.hidden = false;
+
       $('uwDoneLinks').innerHTML = links.map((l,i)=>renderDoneLink(l,i)).join('');
       $('uwDoneLinks').querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>{
         const inp=document.getElementById(b.dataset.copy); inp.select();
@@ -768,7 +828,6 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       }));
       engine.clearDone();                              // consumed — drop them from the worker
       $('uwSend').hidden=true; $('uwStatus').textContent=''; goStep('done');
-      $('uwCancel').addEventListener('click', ()=>{ window.location=U.mine; }, {once:true});
     }catch(err){ showErr('Error: '+err); $('uwSend').disabled=false; updateSendLabel(); }
   });
 
@@ -816,7 +875,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       if(!$('uwMini').hidden){ restore(); }            // bring back the minimized panel
       else { open(trigger.dataset.uwGroup || ''); }
     }
-    if(e.target.closest('[data-uw-close]')){ e.preventDefault(); if(step==='done') window.location=U.mine; else closeOrMinimize(); }
+    if(e.target.closest('[data-uw-close]')){ e.preventDefault(); if(step==='done') close(); else closeOrMinimize(); }
     if(e.target===m) closeOrMinimize();
   });
   document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !m.hidden) closeOrMinimize(); });

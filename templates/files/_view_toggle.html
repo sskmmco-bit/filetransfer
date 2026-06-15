@@ -1,9 +1,9 @@
 {% comment %}List/grid view switch. Expects `view` ('list'|'grid') in context.{% endcomment %}
 <div class="view-seg" role="group" aria-label="View mode">
-  <a class="view-seg-btn {% if view != 'grid' %}on{% endif %}" href="?view=list" title="List view" aria-label="List view">
+  <a class="view-seg-btn {% if view != 'grid' %}on{% endif %}" href="?view=list{% if current_type %}&type={{ current_type }}{% endif %}{% if request.GET.q %}&q={{ request.GET.q|urlencode }}{% endif %}" title="List view" aria-label="List view">
     <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
   </a>
-  <a class="view-seg-btn {% if view == 'grid' %}on{% endif %}" href="?view=grid" title="Grid view" aria-label="Grid view">
+  <a class="view-seg-btn {% if view == 'grid' %}on{% endif %}" href="?view=grid{% if current_type %}&type={{ current_type }}{% endif %}{% if request.GET.q %}&q={{ request.GET.q|urlencode }}{% endif %}" title="Grid view" aria-label="Grid view">
     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
   </a>
 </div>

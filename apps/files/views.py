@@ -483,6 +483,12 @@ def _remember_view(request, response):
     return response
 
 
+def _list_template(request, full: str, partial: str) -> str:
+    """Pick the partial (just the results region) for a live-search AJAX fetch,
+    else the full page. The debounced search bar requests ?partial=1."""
+    return partial if request.GET.get("partial") else full
+
+
 def _apply_type_filter(request, qs, field: str = "original_filename"):
     """Narrow a queryset to the ?type= bucket (by filename extension)."""
     from .templatetags.file_extras import type_q
@@ -492,6 +498,47 @@ def _apply_type_filter(request, qs, field: str = "original_filename"):
     if q is not None:
         qs = qs.filter(q)
     return qs, key
+
+
+def _apply_search(request, qs, prefix: str = ""):
+    """Narrow a file queryset to the ?q= term across name + metadata.
+
+    Matches substrings in filename / title / description / message / category
+    name (every term must hit at least one field — AND across words, OR across
+    fields), then ranks by trigram similarity to the two identifying columns so
+    the closest filename/title match floats up. The filename + title columns
+    carry `gin_trgm_ops` GIN indexes (migration 0011), so the ILIKEs are
+    index-assisted rather than a sequential scan.
+
+    `prefix` reaches through a relation for querysets rooted elsewhere, e.g.
+    'stored_file__' when filtering a FileAssignment queryset.
+
+    Returns (queryset, q) — q is '' when no/blank search, leaving qs untouched.
+    """
+    q = (request.GET.get("q") or "").strip()
+    if not q:
+        return qs, ""
+
+    from django.contrib.postgres.search import TrigramSimilarity
+
+    name_f = f"{prefix}original_filename"
+    title_f = f"{prefix}title"
+    cond = Q()
+    for term in q.split()[:10]:  # cap terms so a pathological query can't blow up
+        cond &= (
+            Q(**{f"{name_f}__icontains": term})
+            | Q(**{f"{title_f}__icontains": term})
+            | Q(**{f"{prefix}description__icontains": term})
+            | Q(**{f"{prefix}message__icontains": term})
+            | Q(**{f"{prefix}categories__name__icontains": term})
+        )
+    qs = (
+        qs.filter(cond)
+        .annotate(search_rank=TrigramSimilarity(name_f, q) + TrigramSimilarity(title_f, q))
+        .order_by("-search_rank", f"-{prefix}created_at")
+        .distinct()
+    )
+    return qs, q
 
 
 def _starred_ids(request) -> set:
@@ -518,10 +565,12 @@ def my_uploads(request):
         .order_by("-created_at")
     )
     qs, current_type = _apply_type_filter(request, qs)
+    qs, q = _apply_search(request, qs)
     page = _paginate(request, qs)
-    resp = render(request, "files/my_uploads.html",
+    template = _list_template(request, "files/my_uploads.html", "files/_results_uploads.html")
+    resp = render(request, template,
                   {"files": page, "page": page, "view": _view_mode(request),
-                   "current_type": current_type, "starred_ids": _starred_ids(request)})
+                   "current_type": current_type, "q": q, "starred_ids": _starred_ids(request)})
     return _remember_view(request, resp)
 
 
@@ -534,10 +583,12 @@ def my_files(request):
         .select_related("stored_file", "assigned_by")
     )
     qs, current_type = _apply_type_filter(request, qs, field="stored_file__original_filename")
+    qs, q = _apply_search(request, qs, prefix="stored_file__")
     page = _paginate(request, qs)
-    resp = render(request, "files/my_files.html",
+    template = _list_template(request, "files/my_files.html", "files/_results_shared.html")
+    resp = render(request, template,
                   {"assignments": page, "page": page, "view": _view_mode(request),
-                   "current_type": current_type, "starred_ids": _starred_ids(request)})
+                   "current_type": current_type, "q": q, "starred_ids": _starred_ids(request)})
     return _remember_view(request, resp)
 
 
@@ -565,10 +616,12 @@ def starred(request):
     if not request.user.has_perm_code("files.view_all"):
         base = base.filter(visible).distinct()
     qs, current_type = _apply_type_filter(request, base)
+    qs, q = _apply_search(request, qs)
     page = _paginate(request, qs)
-    resp = render(request, "files/starred.html",
+    template = _list_template(request, "files/starred.html", "files/_results_starred.html")
+    resp = render(request, template,
                   {"files": page, "page": page, "view": _view_mode(request),
-                   "current_type": current_type, "starred_ids": _starred_ids(request)})
+                   "current_type": current_type, "q": q, "starred_ids": _starred_ids(request)})
     return _remember_view(request, resp)
 
 
@@ -612,13 +665,15 @@ def group_space(request, pk):
     )
     total_count = files_qs.count()
     files_qs, current_type = _apply_type_filter(request, files_qs)
+    files_qs, q = _apply_search(request, files_qs)
     page = _paginate(request, files_qs)
     members = group.members.order_by("first_name", "username")
-    resp = render(request, "files/group_space.html", {
+    template = _list_template(request, "files/group_space.html", "files/_results_group.html")
+    resp = render(request, template, {
         "group": group, "files": page, "page": page, "members": members,
         "is_member": is_member, "file_count": total_count,
         "view": _view_mode(request),
-        "current_type": current_type, "starred_ids": _starred_ids(request),
+        "current_type": current_type, "q": q, "starred_ids": _starred_ids(request),
     })
     return _remember_view(request, resp)
 

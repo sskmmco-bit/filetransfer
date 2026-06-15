@@ -1,0 +1,32 @@
+# Optional Locust load-testing service.
+#
+# Runs the Locust web UI on http://localhost:8089 inside the project network so
+# it can reach the app as http://web:8000 (no host port juggling). Bring it up
+# ALONGSIDE the dev stack so the `web` service + its network exist:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.locust.yml up locust
+#
+# Then open http://localhost:8089, set users/spawn-rate, and start.
+#
+# Headless (no UI) — print a report and exit after 5 minutes:
+#   docker compose -f docker-compose.yml -f docker-compose.locust.yml run --rm \
+#     locust -f /mnt/locust/locustfile.py --host http://web:8000 \
+#     --users 50 --spawn-rate 5 --run-time 5m --headless
+#
+# Prefer running Locust on your host instead? See load_tests/README.md.
+services:
+  locust:
+    image: locustio/locust:2.32.4
+    profiles: ["loadtest"]          # never starts with a bare `docker compose up`
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./load_tests:/mnt/locust:ro
+    command: >-
+      -f /mnt/locust/locustfile.py
+      --host http://web:8000
+    environment:
+      LOCUST_USER: ${DJANGO_SUPERUSER_USERNAME:-admin}
+      LOCUST_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-adminpass123}
+    depends_on:
+      - web

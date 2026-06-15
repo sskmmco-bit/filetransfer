@@ -1,10 +1,21 @@
-{% comment %}File-type filter chips. Expects `current_type` (''|'doc'|'img'|'vid'|'zip'|'code'|'other')
-and `view` in context. Each chip preserves the current view mode.{% endcomment %}
+{% comment %}File-type filter as a compact icon dropdown. Expects `current_type`
+('' |'doc'|'img'|'vid'|'zip'|'code'|'other') and `view` in context. Options are
+plain links (full navigation) that preserve the current view + search term; the
+open/close behaviour is wired globally in base.html.{% endcomment %}
 {% load file_extras %}
 {% file_type_filters as type_filters %}
-<div class="filterbar" role="group" aria-label="Filter by type">
-  {% for key, label in type_filters %}
-  <a class="fchip {% if current_type == key %}on{% endif %}"
-     href="?{% if key %}type={{ key }}&{% endif %}view={{ view }}">{{ label }}</a>
-  {% endfor %}
+<div class="ffilter" data-filter-menu>
+  <button type="button" class="ffilter-btn{% if current_type %} on{% endif %}"
+          data-filter-toggle aria-haspopup="true" aria-expanded="false" aria-label="Filter by type" title="Filter by type">
+    <svg viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    {% if current_type %}<span class="ffilter-dot" aria-hidden="true"></span>{% endif %}
+  </button>
+  <div class="ffilter-menu" data-filter-list hidden role="menu">
+    {% for key, label in type_filters %}
+    <a class="ffilter-opt{% if current_type == key %} on{% endif %}" role="menuitem"
+       href="?{% if key %}type={{ key }}&{% endif %}view={{ view }}{% if request.GET.q %}&q={{ request.GET.q|urlencode }}{% endif %}">
+      <span>{{ label }}</span>{% if current_type == key %}<span class="ffilter-check" aria-hidden="true">✓</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
 </div>

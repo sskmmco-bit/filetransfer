@@ -422,13 +422,39 @@
     .istar:hover{color:#f5b301;}
     @media (hover:none){ .frow .factions .iaction,.file-card .fc-actions .iaction{opacity:1;} }
 
-    /* ---- file type filter chips ---- */
-    .filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
-    .fchip{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;
-      border:1px solid var(--line);background:#fff;color:var(--muted);font-size:13px;font-weight:600;
-      cursor:pointer;transition:.12s;white-space:nowrap;}
-    .fchip:hover{border-color:#d3e6c5;color:var(--accent2);text-decoration:none;}
-    .fchip.on{background:var(--accent-soft);border-color:#d3e6c5;color:var(--accent2);}
+    /* ---- file search box ---- */
+    .fsearch{position:relative;display:flex;align-items:center;flex:1;min-width:180px;max-width:340px;}
+    .fsearch svg{position:absolute;left:12px;width:16px;height:16px;color:var(--muted);pointer-events:none;}
+    .fsearch input[type=search]{width:100%;padding:9px 34px 9px 36px;border:1px solid var(--line);
+      border-radius:999px;font-size:13.5px;background:#fff;color:var(--ink);}
+    .fsearch input[type=search]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+    .fsearch input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
+    .fsearch-spin{position:absolute;right:12px;width:14px;height:14px;border-radius:50%;
+      border:2px solid var(--accent-soft);border-top-color:var(--accent);opacity:0;transition:opacity .12s;}
+    [data-filelist].searching .fsearch-spin{opacity:1;animation:fspin .6s linear infinite;}
+    @keyframes fspin{to{transform:rotate(360deg);}}
+    [data-filelist].searching [data-results]{opacity:.55;transition:opacity .12s;}
+    .fsearch-empty em{color:var(--ink);font-style:normal;font-weight:600;}
+
+    /* ---- file type filter (icon dropdown) ---- */
+    .ffilter{position:relative;flex:none;}
+    .ffilter-btn{display:inline-flex;align-items:center;justify-content:center;height:38px;width:38px;padding:0;
+      border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--muted);cursor:pointer;position:relative;
+      transition:border-color .12s,color .12s,background .12s;}
+    .ffilter-btn:hover{border-color:#d3e6c5;color:var(--accent2);}
+    .ffilter-btn.on{background:var(--accent-soft);border-color:#d3e6c5;color:var(--accent2);}
+    .ffilter-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+    .ffilter-dot{position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;
+      background:var(--accent);border:2px solid #fff;}
+    .ffilter-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:1100;min-width:184px;
+      background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px rgba(16,24,40,.14);
+      padding:6px;animation:cpop .12s ease-out;}
+    .ffilter-menu[hidden]{display:none;}
+    .ffilter-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;
+      border-radius:8px;font-size:13.5px;font-weight:500;color:var(--ink);white-space:nowrap;}
+    .ffilter-opt:hover{background:var(--accent-soft);color:var(--accent2);text-decoration:none;}
+    .ffilter-opt.on{background:var(--accent-soft);color:var(--accent2);font-weight:600;}
+    .ffilter-check{color:var(--accent2);font-weight:700;}
     .flist-bulk{display:flex;align-items:center;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
     /* selection action bar — shown above the list only when rows are selected */
     .flist-actionbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:10px 14px;
@@ -519,8 +545,6 @@
       .toolbar{flex-wrap:wrap;}
       .toolbar input[type=text]{max-width:none;flex:1 1 100%;min-width:0;}
       .toolbar .spacer{display:none;}
-      .filterbar{gap:6px;}
-      .fchip{padding:6px 11px;font-size:12px;}
       .lnk-reveal .row2{grid-template-columns:1fr;}
       .lnk-urlrow{flex-direction:column;}
       .fpager{flex-direction:column;align-items:stretch;text-align:center;}
@@ -968,6 +992,108 @@
         }
       }).catch(function(){ delete btn.dataset.busy; });
   });
+  </script>
+
+  {# ---- debounced file search: swaps [data-results] in place (any file list) ---- #}
+  <script>
+  (function(){
+    var root = document.querySelector('[data-filelist]');
+    if(!root) return;
+    var input = root.querySelector('[data-search]');
+    var results = root.querySelector('[data-results]');
+    if(!input || !results) return;
+
+    var timer, seq = 0;
+
+    // Keep the static toolbar links (filter chips, view toggle) carrying the
+    // current term, so a full navigation after live-typing doesn't drop it.
+    function syncLinks(){
+      var q = input.value.trim();
+      root.querySelectorAll('.ffilter-menu a, .view-seg a').forEach(function(a){
+        var u = new URL(a.getAttribute('href'), location.href);
+        if(q) u.searchParams.set('q', q); else u.searchParams.delete('q');
+        a.setAttribute('href', u.pathname + u.search);
+      });
+    }
+
+    // Fetch the results partial for `url` and swap it in (ignoring stale replies).
+    function swap(url){
+      var u = new URL(url, location.href);
+      u.searchParams.delete('partial');
+      history.replaceState(null, '', u.pathname + u.search);   // clean address bar
+      var fu = new URL(u.toString());
+      fu.searchParams.set('partial', '1');
+      var id = ++seq;
+      root.classList.add('searching');
+      fetch(fu.pathname + fu.search, {headers: {'X-Requested-With': 'XMLHttpRequest'}})
+        .then(function(r){ return r.text(); })
+        .then(function(html){
+          if(id !== seq) return;                                // a newer request won
+          results.innerHTML = html;
+          root.classList.remove('searching');
+          syncLinks();
+          root.dispatchEvent(new CustomEvent('filelist:updated', {bubbles: true}));
+        })
+        .catch(function(){ if(id === seq) root.classList.remove('searching'); });
+    }
+
+    function fromInput(){
+      var u = new URL(location.href);
+      var q = input.value.trim();
+      if(q) u.searchParams.set('q', q); else u.searchParams.delete('q');
+      u.searchParams.delete('page');                            // new search → page 1
+      swap(u.toString());
+    }
+
+    input.addEventListener('input', function(){
+      clearTimeout(timer);
+      timer = setTimeout(fromInput, 250);                       // debounce
+    });
+    input.addEventListener('keydown', function(e){
+      if(e.key === 'Enter'){ e.preventDefault(); clearTimeout(timer); fromInput(); }
+    });
+
+    // Pager links live inside the swapped region — keep them in-page too.
+    results.addEventListener('click', function(e){
+      var a = e.target.closest('a[data-page-link]');
+      if(!a) return;
+      e.preventDefault();
+      swap(a.getAttribute('href'));
+      root.scrollIntoView({block: 'start', behavior: 'smooth'});
+    });
+
+    syncLinks();
+  })();
+  </script>
+
+  {# ---- file-type filter dropdown (icon button → menu) ---- #}
+  <script>
+  (function(){
+    function closeAll(except){
+      document.querySelectorAll('[data-filter-menu]').forEach(function(m){
+        if(m === except) return;
+        var list = m.querySelector('[data-filter-list]');
+        var btn = m.querySelector('[data-filter-toggle]');
+        if(list) list.hidden = true;
+        if(btn) btn.setAttribute('aria-expanded', 'false');
+      });
+    }
+    document.addEventListener('click', function(e){
+      var toggle = e.target.closest('[data-filter-toggle]');
+      if(toggle){
+        e.preventDefault(); e.stopPropagation();
+        var menu = toggle.closest('[data-filter-menu]');
+        var list = menu.querySelector('[data-filter-list]');
+        var willOpen = list.hidden;
+        closeAll(menu);
+        list.hidden = !willOpen;
+        toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        return;
+      }
+      if(!e.target.closest('[data-filter-list]')) closeAll();  // outside click
+    });
+    document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeAll(); });
+  })();
   </script>
   {% endblock %}
   {% endwith %}

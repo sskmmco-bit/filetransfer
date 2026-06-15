@@ -1,0 +1,10 @@
+{% comment %}Debounced file search box. Lives in the static toolbar (outside the
+swapped [data-results] region). The global script in base.html debounces input,
+fetches ?q=…&partial=1, and swaps the results in place. Pre-filled from ?q= so a
+full page load (pager / filter chip / no-JS) keeps the term.{% endcomment %}
+<div class="fsearch">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+  <input type="search" data-search value="{{ request.GET.q|default:'' }}"
+         placeholder="Search files…" autocomplete="off" aria-label="Search files">
+  <span class="fsearch-spin" aria-hidden="true"></span>
+</div>

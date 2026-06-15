@@ -1,0 +1,83 @@
+{% comment %}Results region for My Files (files:my_uploads). Swapped in place by
+the debounced search (base.html) on ?partial=1, so it must be self-contained and
+rely only on document-delegated handlers (bulk select / share / delete are
+delegated in my_uploads.html; star toggle + confirmAction are global).{% endcomment %}
+{% load file_extras %}
+{% if files %}
+  <form method="post" action="{% url 'files:download_zip' %}" id="filesForm">
+    {% csrf_token %}
+    <div class="flist-actionbar" id="bulkBar" hidden>
+      <span id="bulkCount">0 selected</span>
+      <span style="flex:1;"></span>
+      <button type="button" id="bulkShareBtn" class="btn-sm">↗ Share selected</button>
+      <button type="submit" id="zipBtn" class="btn-ghost btn-sm" formaction="{% url 'files:download_zip' %}">⬇ Download ZIP</button>
+      <button type="submit" id="bulkDelBtn" class="btn-danger btn-sm" formaction="{% url 'files:bulk_delete' %}">🗑 Move to trash</button>
+    </div>
+    {% if view == 'grid' %}
+    <div class="file-grid">
+      {% for f in files %}{% include "files/_file_card.html" with f=f selectable=True can_delete=True can_share=True %}{% endfor %}
+    </div>
+    {% else %}
+    <div class="flist">
+      <div class="flist-head">
+        <span style="display:flex;align-items:center;gap:12px;"><input type="checkbox" id="selAll" class="fcheck" title="Select all"> Name</span>
+        <span>Access</span>
+        <span class="h-size">Size</span>
+        <span class="h-date">Created</span>
+      </div>
+      {% for f in files %}
+      <div class="frow">
+        <div class="fmain">
+          <input type="checkbox" name="uuids" value="{{ f.uuid }}" class="fcheck" title="Select">
+          <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
+          <div class="fmeta">
+            <a class="fname" href="{% url 'files:detail' uuid=f.uuid %}">{{ f.display_name }}</a>
+            <div class="fsub">
+              {% if f.status == 'active' %}{{ f.download_count }} download{{ f.download_count|pluralize }}{% if f.expiry_date %} · expires {{ f.expiry_date|date:"M j" }}{% endif %}{% else %}{{ f.get_status_display }}{% endif %}
+            </div>
+          </div>
+          <div class="factions">
+            {% include "files/_star_btn.html" %}
+            {% if f.status == 'active' %}
+            <button type="button" class="iaction js-share-one" data-uuid="{{ f.uuid }}" title="Share">
+              <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg></button>
+            {% endif %}
+            {% if f|previewable %}
+            <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
+              <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
+            {% endif %}
+            {% if f.status == 'active' %}
+            <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
+            {% endif %}
+            <button type="button" class="iaction danger js-del" data-url="{% url 'files:delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
+              <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
+          </div>
+        </div>
+        <div>
+          {% with acc=f|faccess %}
+          {% if acc == 'pub' %}<span class="fbadge pub">● Public</span>
+          {% elif acc == 'team' %}<span class="fbadge team">● Shared</span>
+          {% else %}<span class="fbadge priv">● Private</span>{% endif %}
+          {% endwith %}
+        </div>
+        <div class="fsize">{{ f.size|filesizeformat }}</div>
+        <div class="fdate">{{ f.created_at|date:"M j, Y" }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </form>
+  {% include "files/_pager.html" %}
+{% elif q %}
+  <div class="fempty fsearch-empty">
+    <div class="big">🔍</div>
+    <p>No files match <em>“{{ q }}”</em>.</p>
+  </div>
+{% else %}
+  <div class="fempty">
+    <div class="big">📂</div>
+    <p>You haven't uploaded any files yet.</p>
+    <button type="button" class="btn" data-uw-open style="margin-top:6px;">Upload your first file</button>
+  </div>
+{% endif %}

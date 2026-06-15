@@ -1,0 +1,57 @@
+{% comment %}Results region for Shared with Me (files:my_files). Swapped in place
+by the debounced search on ?partial=1.{% endcomment %}
+{% load file_extras %}
+{% if assignments %}
+  <form method="post" action="{% url 'files:download_zip' %}">
+    {% csrf_token %}
+    {% if view == 'grid' %}
+    <div class="file-grid">
+      {% for a in assignments %}{% include "files/_file_card.html" with f=a.stored_file selectable=True %}{% endfor %}
+    </div>
+    {% else %}
+    <div class="flist">
+      {% for a in assignments %}
+      {% with f=a.stored_file %}
+      <div class="frow" style="grid-template-columns:1fr 150px;">
+        <div class="fmain">
+          <input type="checkbox" name="uuids" value="{{ f.uuid }}" class="fcheck" title="Select">
+          <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
+          <div class="fmeta">
+            <a class="fname" href="{% url 'files:detail' uuid=f.uuid %}">{{ f.display_name }}</a>
+            <div class="fsub">
+              From {{ a.assigned_by.get_full_name|default:a.assigned_by.username|default:"—" }}
+              · {{ f.size|filesizeformat }}{% if f.expiry_date %} · expires {{ f.expiry_date|date:"M j" }}{% endif %}
+            </div>
+          </div>
+          <div class="factions">
+            {% include "files/_star_btn.html" %}
+            {% if f|previewable %}
+            <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
+              <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
+            {% endif %}
+            <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
+          </div>
+        </div>
+        <div class="fdate">{{ a.created_at|date:"M j, Y" }}</div>
+      </div>
+      {% endwith %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="flist-bulk">
+      <button type="submit" class="btn-ghost">⬇ Download selected as ZIP</button>
+    </div>
+  </form>
+  {% include "files/_pager.html" %}
+{% elif q %}
+  <div class="fempty fsearch-empty">
+    <div class="big">🔍</div>
+    <p>No shared files match <em>“{{ q }}”</em>.</p>
+  </div>
+{% else %}
+  <div class="fempty">
+    <div class="big">📥</div>
+    <p>No files have been shared with you yet.</p>
+  </div>
+{% endif %}

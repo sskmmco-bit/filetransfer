@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",  # trigram search operators + GIN index support (file search)
     # Project apps (§3) — app labels: accounts, core, config, files,
     # notifications, audit, public
     "apps.accounts",

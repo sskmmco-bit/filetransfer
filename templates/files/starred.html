@@ -10,66 +10,14 @@
 </div>
 
 <div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+    {% include "files/_searchbar.html" %}
+    <span style="flex:1;"></span>
     {% include "files/_filter_bar.html" %}
     {% include "files/_view_toggle.html" %}
   </div>
-  {% if files %}
-    {% if view == 'grid' %}
-    <div class="file-grid">
-      {% for f in files %}{% include "files/_file_card.html" with f=f %}{% endfor %}
-    </div>
-    {% else %}
-    <div class="flist">
-      <div class="flist-head">
-        <span>Name</span>
-        <span>Access</span>
-        <span class="h-size">Size</span>
-        <span class="h-date">Added</span>
-      </div>
-      {% for f in files %}
-      <div class="frow">
-        <div class="fmain">
-          <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
-          <div class="fmeta">
-            <a class="fname" href="{% url 'files:detail' uuid=f.uuid %}">{{ f.display_name }}</a>
-            <div class="fsub">By {{ f.owner.get_full_name|default:f.owner.username }}{% if f.expiry_date %} · expires {{ f.expiry_date|date:"M j" }}{% endif %}</div>
-          </div>
-          <div class="factions">
-            {% include "files/_star_btn.html" %}
-            {% if f|previewable %}
-            <a class="iaction" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" title="Preview">
-              <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
-            {% endif %}
-            {% if f.status == 'active' %}
-            <a class="iaction" href="{% url 'files:download' uuid=f.uuid %}" title="Download">
-              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
-            {% endif %}
-          </div>
-        </div>
-        <div>
-          {% with acc=f|faccess %}
-          {% if acc == 'pub' %}<span class="fbadge pub">● Public</span>
-          {% elif acc == 'team' %}<span class="fbadge team">● Shared</span>
-          {% else %}<span class="fbadge priv">● Private</span>{% endif %}
-          {% endwith %}
-        </div>
-        <div class="fsize">{{ f.size|filesizeformat }}</div>
-        <div class="fdate">{{ f.created_at|date:"M j, Y" }}</div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  {% include "files/_pager.html" %}
-  {% else %}
-  <div class="fempty">
-    <div class="big">⭐</div>
-    {% if current_type %}
-    <p>No starred files of this type. <a href="?view={{ view }}">Show all starred</a></p>
-    {% else %}
-    <p>No starred files yet. Hover any file and tap the ★ to add it here.</p>
-    {% endif %}
+  <div data-results>
+    {% include "files/_results_starred.html" %}
   </div>
-  {% endif %}
 </div>
 {% endblock %}
