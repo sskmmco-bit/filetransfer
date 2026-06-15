@@ -157,6 +157,11 @@ def request_code(request, token):
             request, link, files, ready=False, gate="verify", email_form=form))
 
     email = form.cleaned_data["email"]
+    # Whitelisted (restricted) link: only listed emails may verify.
+    if not link.is_email_allowed(email):
+        return render(request, "public/landing.html", _landing_ctx(
+            request, link, files, ready=False, gate="verify", email_form=EmailForm(),
+            error="This email isn’t authorized to open this link. Ask the sender for access."))
     code = f"{secrets.randbelow(1_000_000):06d}"
     # The challenge is bound to the link + token snapshot (rotate invalidates it).
     PublicDownloadVerification.objects.filter(share_link=link, email=email).delete()

@@ -1,19 +1,92 @@
 {% extends "base.html" %}
 {% block title %}Verify to download — MMFileTransfer{% endblock %}
 {% block content %}
-<h1>Enter verification code</h1>
-<div class="card" style="max-width:420px; margin-top:16px;">
-  {% if error %}<div class="errornote">{{ error }}</div>{% endif %}
-  <p style="color:#5d6d7e;">We emailed a 6-digit code to <strong>{{ email }}</strong>. It expires in 15 minutes.</p>
-  <form method="post" action="{% url 'public:verify_code' token=token %}">
-    {% csrf_token %}
-    <input type="hidden" name="email" value="{{ email }}">
-    {% for field in code_form %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% for err in field.errors %}<div class="errorlist">{{ err }}</div>{% endfor %}
-    {% endfor %}
-    <button type="submit">Verify &amp; download</button>
-  </form>
+
+<style>
+  .otp-wrap{max-width:440px;margin:0 auto;}
+  .otp-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:26px 26px 24px;
+    box-shadow:0 1px 3px rgba(16,24,40,.05),0 12px 24px rgba(16,24,40,.05);}
+  .otp-card h1{margin:0 0 6px;font-size:20px;}
+  .otp-sub{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 20px;}
+  .otp-sub b{color:var(--ink);}
+  .otp-inputs{display:flex;gap:10px;justify-content:space-between;}
+  .otp-inputs input{flex:1;min-width:0;height:58px;text-align:center;font-size:24px;font-weight:700;
+    color:var(--ink);border:1.5px solid var(--line);border-radius:12px;background:#fafbff;
+    transition:border-color .12s,box-shadow .12s,background .12s;-moz-appearance:textfield;}
+  .otp-inputs input::-webkit-outer-spin-button,.otp-inputs input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .otp-inputs input:focus{outline:none;border-color:var(--accent);background:#fff;
+    box-shadow:0 0 0 3px var(--accent-soft);}
+  .otp-inputs input.filled{border-color:var(--accent);background:#fff;}
+  .otp-err{background:var(--red-bg,#fdecec);color:var(--red,#e0564a);border:1px solid #f3c9c4;
+    border-radius:10px;padding:9px 12px;font-size:13px;margin-bottom:16px;}
+  .otp-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;
+    padding:12px;border-radius:12px;font-weight:600;font-size:15px;cursor:pointer;border:0;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;}
+  .otp-btn:disabled{opacity:.55;cursor:not-allowed;}
+  .otp-hint{color:var(--muted);font-size:12px;text-align:center;margin-top:14px;}
+</style>
+
+<div class="otp-wrap">
+  <div class="otp-card">
+    <h1>Enter verification code</h1>
+    {% if error %}<div class="otp-err">{{ error }}</div>{% endif %}
+    <p class="otp-sub">We emailed a 6-digit code to <b>{{ email }}</b>.<br>It expires in 15 minutes.</p>
+
+    <form method="post" action="{% url 'public:verify_code' token=token %}" id="otpForm">
+      {% csrf_token %}
+      <input type="hidden" name="email" value="{{ email }}">
+      <input type="hidden" name="code" id="otpValue">
+      <div class="otp-inputs" id="otpBoxes">
+        {% for i in "123456" %}
+        <input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="1"
+               aria-label="Digit {{ forloop.counter }}"{% if forloop.first %} autofocus{% endif %}>
+        {% endfor %}
+      </div>
+      <button type="submit" class="otp-btn" id="otpSubmit" disabled>Verify &amp; download</button>
+      <div class="otp-hint">Tip: you can paste the whole code at once.</div>
+    </form>
+  </div>
 </div>
+
+<script>
+(function(){
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('#otpBoxes input'));
+  var hidden = document.getElementById('otpValue');
+  var submit = document.getElementById('otpSubmit');
+  var form = document.getElementById('otpForm');
+  if(!boxes.length) return;
+
+  function collect(){
+    var code = boxes.map(function(b){ return b.value; }).join('');
+    hidden.value = code;
+    submit.disabled = code.length !== boxes.length;
+    boxes.forEach(function(b){ b.classList.toggle('filled', !!b.value); });
+    return code;
+  }
+  function focusAt(i){ if(boxes[i]){ boxes[i].focus(); boxes[i].select(); } }
+
+  boxes.forEach(function(box, i){
+    box.addEventListener('input', function(e){
+      // keep only the last typed digit
+      var v = (e.target.value || '').replace(/\D/g,'');
+      e.target.value = v ? v.slice(-1) : '';
+      if(e.target.value && i < boxes.length-1) focusAt(i+1);
+      if(collect().length === boxes.length) form.requestSubmit ? form.requestSubmit() : form.submit();
+    });
+    box.addEventListener('keydown', function(e){
+      if(e.key === 'Backspace' && !e.target.value && i > 0){ focusAt(i-1); e.preventDefault(); }
+      else if(e.key === 'ArrowLeft' && i > 0){ focusAt(i-1); e.preventDefault(); }
+      else if(e.key === 'ArrowRight' && i < boxes.length-1){ focusAt(i+1); e.preventDefault(); }
+    });
+    box.addEventListener('paste', function(e){
+      e.preventDefault();
+      var digits = (e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0, boxes.length).split('');
+      boxes.forEach(function(b, j){ b.value = digits[j] || ''; });
+      focusAt(Math.min(digits.length, boxes.length-1));
+      if(collect().length === boxes.length) form.requestSubmit ? form.requestSubmit() : form.submit();
+    });
+  });
+  collect();
+})();
+</script>
 {% endblock %}

@@ -25,14 +25,18 @@ def get_email_connection():
 
     s = SiteSettings.get()
     if s.smtp_enabled and s.smtp_host:
+        # TLS (STARTTLS) and SSL (implicit) are mutually exclusive — Django
+        # raises if both are set. Implicit SSL (e.g. port 465) wins.
+        use_ssl = bool(s.smtp_use_ssl)
+        use_tls = bool(s.smtp_use_tls) and not use_ssl
         return get_connection(
             backend="django.core.mail.backends.smtp.EmailBackend",
             host=s.smtp_host,
             port=s.smtp_port,
             username=s.smtp_username or None,
             password=s.get_smtp_password() or None,
-            use_tls=s.smtp_use_tls,
-            use_ssl=s.smtp_use_ssl,
+            use_tls=use_tls,
+            use_ssl=use_ssl,
         )
     return get_connection()
 

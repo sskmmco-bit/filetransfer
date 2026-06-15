@@ -260,7 +260,14 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
               <div class="lnk-row">
                 <div class="lnk-main"><div class="lnk-t">Require email verification</div>
                   <div class="lnk-s">Visitors confirm their email before opening (tracked access).</div></div>
-                <label class="switch"><input type="checkbox" id="uwVerify"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="uwVerify" data-toggle="uwverify"><span class="slider"></span></label>
+              </div>
+              <div class="lnk-reveal" data-reveal="uwverify" hidden>
+                <label class="lnk-emailrow"><input type="checkbox" id="uwRestrict" data-toggle="uwrestrict"> Restrict to specific emails</label>
+                <div class="lnk-reveal" data-reveal="uwrestrict" hidden>
+                  <textarea id="uwEmails" rows="3" placeholder="john@company.com, sarah@company.com"></textarea>
+                  <div class="hint">Only these addresses can verify &amp; open the link.</div>
+                </div>
               </div>
               <div class="lnk-row">
                 <div class="lnk-main"><div class="lnk-t">Preview only</div>
@@ -416,8 +423,8 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     $('uwExpiry').value=''; $('uwExpiry').hidden=true; $('uwExpirySel').value='';
     $('uwDoneTitle').textContent='✓ Files sent';
     $('uwCat').value=''; $('uwNotify').checked=true;
-    ['uwVerify','uwPreviewOnly','uwPwdToggle','uwLimitToggle'].forEach(id=>{ if($(id)) $(id).checked=false; });
-    if($('uwPwd')) $('uwPwd').value=''; if($('uwLimit')) $('uwLimit').value='';
+    ['uwVerify','uwRestrict','uwPreviewOnly','uwPwdToggle','uwLimitToggle'].forEach(id=>{ if($(id)) $(id).checked=false; });
+    if($('uwPwd')) $('uwPwd').value=''; if($('uwLimit')) $('uwLimit').value=''; if($('uwEmails')) $('uwEmails').value='';
     m.querySelectorAll('.lnk-reveal').forEach(r=>r.hidden=true);
     if (window.syncSelects) window.syncSelects(m);
     goStep(1);
@@ -628,6 +635,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     const exSel = $('uwExpirySel').value;
     const pub = $('uwPublic').checked;
     const verify = pub && $('uwVerify').checked;
+    const restrict = verify && $('uwRestrict').checked;
     const wantPwd = pub && $('uwPwdToggle').checked;
     const wantLimit = pub && $('uwLimitToggle').checked;
     const payload={ file_uuids:uuids, description:$('uwDesc').value, message:$('uwMsg').value,
@@ -638,6 +646,8 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       make_public:pub,
       access:(pub ? (verify ? 'tracked' : 'public') : 'public'),
       public_email_verify:verify,
+      restrict_emails:restrict,
+      allowed_emails:(restrict ? $('uwEmails').value : ''),
       preview_only:(pub && $('uwPreviewOnly').checked),
       password:(wantPwd ? ($('uwPwd').value||null) : null),
       download_limit:(wantLimit ? ($('uwLimit').value||null) : null) };

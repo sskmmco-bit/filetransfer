@@ -140,7 +140,14 @@
         <div class="lnk-row">
           <div class="lnk-main"><div class="lnk-t">Require email verification</div>
             <div class="lnk-s">Visitors confirm their email before opening (tracked).</div></div>
-          <label class="switch"><input type="checkbox" id="bsVerify"><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="bsVerify" data-toggle="bsverify"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="bsverify" hidden>
+          <label class="lnk-emailrow"><input type="checkbox" id="bsRestrict" data-toggle="bsrestrict"> Restrict to specific emails</label>
+          <div class="lnk-reveal" data-reveal="bsrestrict" hidden>
+            <textarea id="bsEmails" rows="3" placeholder="john@company.com, sarah@company.com"></textarea>
+            <div class="hint">Only these addresses can verify &amp; open the link.</div>
+          </div>
         </div>
         <div class="lnk-row">
           <div class="lnk-main"><div class="lnk-t">Preview only</div>
@@ -286,8 +293,8 @@
     document.getElementById('bsCount').textContent=n+' file'+(n>1?'s':'')+' selected';
     bsSel=[]; bsRenderChips(); if(bsSearch) bsSearch.value='';
     document.getElementById('bsNotify').checked=true;
-    ['bsPublic','bsVerify','bsPreview','bsPwdToggle','bsExpToggle','bsLimitToggle'].forEach(function(id){ var el=document.getElementById(id); if(el) el.checked=false; });
-    ['bsPwd','bsExp','bsLimit'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+    ['bsPublic','bsVerify','bsRestrict','bsPreview','bsPwdToggle','bsExpToggle','bsLimitToggle'].forEach(function(id){ var el=document.getElementById(id); if(el) el.checked=false; });
+    ['bsPwd','bsExp','bsLimit','bsEmails'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
     bsModal.querySelectorAll('[data-reveal]').forEach(function(r){ r.hidden=true; });
     var res=document.getElementById('bsResult'); res.hidden=true; res.removeAttribute('data-shared');
     document.getElementById('bsErr').hidden=true;
@@ -310,6 +317,7 @@
     var btn=this; var uuids=selectedUuids();
     var pub=document.getElementById('bsPublic').checked;
     var verify=pub && document.getElementById('bsVerify').checked;
+    var restrict=verify && document.getElementById('bsRestrict').checked;
     var wantPwd=pub && document.getElementById('bsPwdToggle').checked;
     var wantExp=pub && document.getElementById('bsExpToggle').checked;
     var wantLimit=pub && document.getElementById('bsLimitToggle').checked;
@@ -324,6 +332,8 @@
       notify:document.getElementById('bsNotify').checked, make_public:pub,
       access:(pub?(verify?'tracked':'public'):'public'),
       require_verify:verify,
+      restrict_emails:restrict,
+      allowed_emails:(restrict?document.getElementById('bsEmails').value:''),
       preview_only:(pub && document.getElementById('bsPreview').checked),
       password:(wantPwd?(document.getElementById('bsPwd').value||null):null),
       expiry_date:(wantExp?(document.getElementById('bsExp').value||null):null),

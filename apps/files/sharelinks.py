@@ -26,17 +26,35 @@ def _new_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def normalize_emails(value) -> list:
+    """Accept a list or a comma/whitespace/newline-separated string → a deduped
+    list of lowercased, plausible emails (must contain '@')."""
+    if isinstance(value, str):
+        import re
+        parts = re.split(r"[\s,;]+", value)
+    else:
+        parts = list(value or [])
+    out = []
+    for p in parts:
+        e = (p or "").strip().lower()
+        if "@" in e and e not in out:
+            out.append(e)
+    return out
+
+
 @transaction.atomic
 def create_link(files, *, created_by, name: str = "", require_verify: bool = False,
                 allow_download: bool = True, password: str | None = None,
-                expires_at=None, download_limit=None) -> ShareLink:
+                expires_at=None, download_limit=None, allowed_emails=None) -> ShareLink:
     """Create a link covering `files` (a list/qs of StoredFile)."""
     files = list(files)
+    emails = normalize_emails(allowed_emails)
     link = ShareLink.objects.create(
         token=_new_token(),
         name=(name or ShareLink.default_name(len(files)))[:120],
         created_by=created_by,
-        require_email_verify=bool(require_verify),
+        require_email_verify=bool(require_verify) or bool(emails),  # whitelist needs verify
+        allowed_emails=emails,
         allow_download=bool(allow_download),
         password_hash=make_password(password) if password else "",
         expires_at=expires_at,
@@ -51,10 +69,12 @@ def create_link(files, *, created_by, name: str = "", require_verify: bool = Fal
 
 @transaction.atomic
 def update_link(link: ShareLink, *, name=KEEP, require_verify=KEEP, allow_download=KEEP,
-                password=KEEP, expires_at=KEEP, download_limit=KEEP) -> ShareLink:
+                password=KEEP, expires_at=KEEP, download_limit=KEEP, allowed_emails=KEEP) -> ShareLink:
     """Update a link's settings. `password`: KEEP leaves it, "" clears, else sets."""
     if name is not KEEP:
         link.name = (name or ShareLink.default_name(link.files.count()))[:120]
+    if allowed_emails is not KEEP:
+        link.allowed_emails = normalize_emails(allowed_emails)
     if require_verify is not KEEP:
         link.require_email_verify = bool(require_verify)
     if allow_download is not KEEP:
@@ -65,6 +85,9 @@ def update_link(link: ShareLink, *, name=KEEP, require_verify=KEEP, allow_downlo
         link.download_limit = download_limit
     if password is not KEEP:
         link.password_hash = make_password(password) if password else ""
+    # A whitelist always implies verification.
+    if link.allowed_emails:
+        link.require_email_verify = True
     link.save()
     sync_file_public_flags(link.files.all())
     return link

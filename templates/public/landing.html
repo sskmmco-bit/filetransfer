@@ -93,7 +93,8 @@
       </div>
     {% else %}
       <div class="pb-verify">
-        <p style="color:var(--muted);margin-top:0;">These files require email verification first.</p>
+        <p style="color:var(--muted);margin-top:0;">{% if link.allowed_emails %}🔒 This is a restricted link — only invited email addresses can open it.{% else %}These files require email verification first.{% endif %}</p>
+        {% if error %}<div class="errorlist">{{ error }}</div>{% endif %}
         <form method="post" action="{% url 'public:request_code' token=token %}">
           {% csrf_token %}
           {% for field in email_form %}

@@ -138,8 +138,11 @@
             {% include "core/console/_set_field.html" with field=form.notification_bcc label="Notification BCC" %}
           </div>
 
-          <div class="set2-testrow">
+          <div class="set2-testrow" style="flex-wrap:wrap;gap:8px;">
             <button type="button" class="btn btn-ghost btn-sm" id="testSmtpBtn">Test SMTP Connection</button>
+            <input type="email" id="testSmtpEmail" placeholder="you@example.com" autocomplete="off"
+                   style="max-width:240px;padding:7px 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;">
+            <button type="button" class="btn btn-ghost btn-sm" id="sendTestSmtpBtn">Send test email</button>
             <span class="set2-testmsg" id="testSmtpMsg"></span>
           </div>
 
@@ -243,28 +246,35 @@
   function syncRet(){ if (retFields && retToggle){ retFields.style.opacity = retToggle.checked ? '1' : '.5'; } }
   if (retToggle){ retToggle.addEventListener('change', syncRet); syncRet(); }
 
-  // Test SMTP connection
+  // Test SMTP connection / send a test email
   var testBtn = document.getElementById('testSmtpBtn');
+  var sendBtn = document.getElementById('sendTestSmtpBtn');
   var testMsg = document.getElementById('testSmtpMsg');
   function val(id){ var el = document.getElementById(id); return el ? el.value : ''; }
   function chk(id){ var el = document.getElementById(id); return el && el.checked ? 'on' : ''; }
-  if (testBtn){
-    testBtn.addEventListener('click', function(){
-      testMsg.textContent = 'Testing…'; testMsg.className = 'set2-testmsg';
-      testBtn.disabled = true;
-      var body = new URLSearchParams({
-        csrfmiddlewaretoken: document.querySelector('[name=csrfmiddlewaretoken]').value,
-        smtp_host: val('id_smtp_host'), smtp_port: val('id_smtp_port'),
-        smtp_username: val('id_smtp_username'), smtp_password: val('id_smtp_password'),
-        smtp_use_tls: chk('id_smtp_use_tls'), smtp_use_ssl: chk('id_smtp_use_ssl')
-      });
-      fetch('{% url "core:test_smtp" %}', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body: body})
-        .then(function(r){ return r.json(); })
-        .then(function(d){ testMsg.textContent = (d.ok ? '✓ ' : '✕ ') + d.message; testMsg.className = 'set2-testmsg ' + (d.ok ? 'ok' : 'bad'); })
-        .catch(function(){ testMsg.textContent = '✕ Request failed.'; testMsg.className = 'set2-testmsg bad'; })
-        .then(function(){ testBtn.disabled = false; });
-    });
+  function runTest(extra, btn, pending){
+    testMsg.textContent = pending; testMsg.className = 'set2-testmsg';
+    if (testBtn) testBtn.disabled = true; if (sendBtn) sendBtn.disabled = true;
+    var params = {
+      csrfmiddlewaretoken: document.querySelector('[name=csrfmiddlewaretoken]').value,
+      smtp_host: val('id_smtp_host'), smtp_port: val('id_smtp_port'),
+      smtp_username: val('id_smtp_username'), smtp_password: val('id_smtp_password'),
+      smtp_use_tls: chk('id_smtp_use_tls'), smtp_use_ssl: chk('id_smtp_use_ssl'),
+      default_from_email: val('id_default_from_email')
+    };
+    Object.assign(params, extra || {});
+    fetch('{% url "core:test_smtp" %}', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body: new URLSearchParams(params)})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ testMsg.textContent = (d.ok ? '✓ ' : '✕ ') + d.message; testMsg.className = 'set2-testmsg ' + (d.ok ? 'ok' : 'bad'); })
+      .catch(function(){ testMsg.textContent = '✕ Request failed.'; testMsg.className = 'set2-testmsg bad'; })
+      .then(function(){ if (testBtn) testBtn.disabled = false; if (sendBtn) sendBtn.disabled = false; });
   }
+  if (testBtn) testBtn.addEventListener('click', function(){ runTest(null, testBtn, 'Testing…'); });
+  if (sendBtn) sendBtn.addEventListener('click', function(){
+    var to = val('testSmtpEmail').trim();
+    if (!to){ testMsg.textContent = '✕ Enter a recipient email first.'; testMsg.className = 'set2-testmsg bad'; return; }
+    runTest({test_email: to}, sendBtn, 'Sending…');
+  });
 })();
 </script>
 {% endblock %}

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
@@ -251,21 +252,42 @@ def test_smtp(request):
     if not password:  # blank => reuse the saved secret
         password = SiteSettings.get().get_smtp_password()
 
+    # Optional: actually deliver a test message to this address.
+    test_email = (request.POST.get("test_email") or "").strip()
+    from_addr = ((request.POST.get("default_from_email") or "").strip()
+                 or SiteSettings.get().default_from_email
+                 or settings.DEFAULT_FROM_EMAIL)
+
     try:
         if use_ssl:
-            server = smtplib.SMTP_SSL(host, port, timeout=10)
+            server = smtplib.SMTP_SSL(host, port, timeout=15)
         else:
-            server = smtplib.SMTP(host, port, timeout=10)
+            server = smtplib.SMTP(host, port, timeout=15)
             if use_tls:
                 server.starttls()
         try:
             server.ehlo()
             if username:
                 server.login(username, password)
+            if test_email:
+                from email.message import EmailMessage as _Msg
+                m = _Msg()
+                m["Subject"] = "MMFileTransfer SMTP test"
+                m["From"] = from_addr
+                m["To"] = test_email
+                m.set_content(
+                    "This is a test email from MMFileTransfer.\n\n"
+                    "If you received this, your SMTP settings are working.")
+                server.send_message(m)
         finally:
             server.quit()
     except Exception as exc:  # noqa: BLE001 — surface the reason to the admin
         return JsonResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"})
+
+    if test_email:
+        return JsonResponse({"ok": True,
+            "message": f"Test email sent to {test_email} from {from_addr}. "
+                       f"Check the inbox (and spam) — delivery can take a moment."})
     return JsonResponse({"ok": True, "message": f"Connected to {host}:{port} successfully."})
 
 

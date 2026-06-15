@@ -289,7 +289,14 @@
         <div class="lnk-row">
           <div class="lnk-main"><div class="lnk-t">Require email verification</div>
             <div class="lnk-s">Visitors confirm their email before opening (tracked).</div></div>
-          <label class="switch"><input type="checkbox" id="clVerify"><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="clVerify" data-toggle="clverify"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="clverify" hidden>
+          <label class="lnk-emailrow"><input type="checkbox" id="clRestrict" data-toggle="clrestrict"> Restrict to specific emails</label>
+          <div class="lnk-reveal" data-reveal="clrestrict" hidden>
+            <textarea id="clEmails" rows="3" placeholder="john@company.com, sarah@company.com"></textarea>
+            <div class="hint">Only these addresses can verify &amp; open the link.</div>
+          </div>
         </div>
         <div class="lnk-row">
           <div class="lnk-main"><div class="lnk-t">Preview only</div>
@@ -351,9 +358,13 @@
     var pwdT=document.getElementById('clPwdToggle'), expT=document.getElementById('clExpToggle'), limT=document.getElementById('clLimitToggle');
     document.getElementById('clSubmit').addEventListener('click', function(){
       var btn=this; btn.disabled=true; btn.textContent='Creating…';
+      var verify=document.getElementById('clVerify').checked;
+      var restrict=verify && document.getElementById('clRestrict').checked;
       var payload={ file_uuids:["{{ file.uuid }}"],
         name:document.getElementById('clName').value,
-        require_verify:document.getElementById('clVerify').checked,
+        require_verify:verify,
+        restrict_emails:restrict,
+        allowed_emails:(restrict?document.getElementById('clEmails').value:''),
         preview_only:document.getElementById('clPreview').checked,
         password:(pwdT.checked?(document.getElementById('clPwd').value||null):null),
         expiry_date:(expT.checked?(document.getElementById('clExp').value||null):null),

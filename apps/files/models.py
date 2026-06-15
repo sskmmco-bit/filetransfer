@@ -221,6 +221,9 @@ class ShareLink(models.Model):
     expires_at = models.DateField(null=True, blank=True)
     password_hash = models.CharField(max_length=255, blank=True)  # blank = no password
     require_email_verify = models.BooleanField(default=False)
+    # Whitelist of lowercased emails allowed to verify. Empty = any verified
+    # email (when require_email_verify). Non-empty implies require_email_verify.
+    allowed_emails = models.JSONField(default=list, blank=True)
     allow_download = models.BooleanField(default=True)  # False = preview-only
     download_limit = models.PositiveIntegerField(null=True, blank=True)  # total across files
 
@@ -258,7 +261,15 @@ class ShareLink(models.Model):
 
     @property
     def access_label(self) -> str:
+        if self.allowed_emails:
+            return "restricted"
         return "tracked" if self.require_email_verify else "public"
+
+    def is_email_allowed(self, email: str) -> bool:
+        """True if this email may verify (any email when no whitelist is set)."""
+        if not self.allowed_emails:
+            return True
+        return (email or "").strip().lower() in self.allowed_emails
 
     def download_limit_reached(self) -> bool:
         return bool(self.download_limit is not None and self.download_count >= self.download_limit)

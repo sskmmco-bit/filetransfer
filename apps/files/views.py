@@ -354,6 +354,7 @@ def upload_finalize(request):
     if make_public:
         # One share link covering every file in the upload, with the chosen
         # access/password/preview controls.
+        wl = sharelinks.normalize_emails(data.get("allowed_emails")) if data.get("restrict_emails") else []
         link = sharelinks.create_link(
             files, created_by=request.user,
             require_verify=bool(data.get("public_email_verify")),
@@ -361,6 +362,7 @@ def upload_finalize(request):
             password=(data.get("password") or None),
             expires_at=expiry_date,
             download_limit=download_limit,
+            allowed_emails=wl,
         )
         public_links = [{"name": link.name, "url": link.build_url(request)}]
 
@@ -769,13 +771,19 @@ def _parse_link_settings(src):
     else:
         password = sharelinks.KEEP
 
+    # Whitelist: only honoured when the "restrict" option is on.
+    allowed_emails = []
+    if truthy(src.get("restrict_emails")) and src.get("allowed_emails"):
+        allowed_emails = sharelinks.normalize_emails(src.get("allowed_emails"))
+
     return {
         "name": (src.get("name") or "").strip(),
-        "require_verify": truthy(src.get("require_verify")) or src.get("access") == "tracked",
+        "require_verify": truthy(src.get("require_verify")) or src.get("access") == "tracked" or bool(allowed_emails),
         "allow_download": not truthy(src.get("preview_only")),
         "password": password,
         "expires_at": expires_at,
         "download_limit": download_limit,
+        "allowed_emails": allowed_emails,
     }
 
 
@@ -839,6 +847,7 @@ def share_link_create(request):
         require_verify=opts["require_verify"], allow_download=opts["allow_download"],
         password=(None if pwd is sharelinks.KEEP else (pwd or None)),
         expires_at=opts["expires_at"], download_limit=opts["download_limit"],
+        allowed_emails=opts["allowed_emails"],
     )
     return JsonResponse({"ok": True, "token": link.token, "url": link.build_url(request),
                          "name": link.name})
@@ -854,6 +863,7 @@ def share_link_update(request, token):
         link, name=opts["name"] or sharelinks.KEEP, require_verify=opts["require_verify"],
         allow_download=opts["allow_download"], password=opts["password"],
         expires_at=opts["expires_at"], download_limit=opts["download_limit"],
+        allowed_emails=opts["allowed_emails"],
     )
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return JsonResponse({"ok": True})
@@ -978,6 +988,7 @@ def bulk_share(request):
                 expiry_date = date.fromisoformat(data["expiry_date"])
             except ValueError:
                 pass
+        wl = sharelinks.normalize_emails(data.get("allowed_emails")) if data.get("restrict_emails") else []
         link = sharelinks.create_link(
             files, created_by=request.user,
             require_verify=bool(data.get("require_verify")),
@@ -985,6 +996,7 @@ def bulk_share(request):
             password=(data.get("password") or None),
             expires_at=expiry_date,
             download_limit=int(data["download_limit"]) if data.get("download_limit") else None,
+            allowed_emails=wl,
         )
         public_url = link.build_url(request)
 

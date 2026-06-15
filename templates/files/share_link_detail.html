@@ -126,7 +126,14 @@
         <div class="lnk-row">
           <div class="lnk-main"><div class="lnk-t">Require email verification</div>
             <div class="lnk-s">Visitors confirm their email before opening (tracked).</div></div>
-          <label class="switch"><input type="checkbox" name="require_verify" {% if link.require_email_verify %}checked{% endif %}><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" name="require_verify" id="sldVerify" data-toggle="sldverify" {% if link.require_email_verify %}checked{% endif %}><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="sldverify" {% if not link.require_email_verify %}hidden{% endif %}>
+          <label class="lnk-emailrow"><input type="checkbox" name="restrict_emails" id="sldRestrict" data-toggle="sldrestrict" {% if link.allowed_emails %}checked{% endif %}> Restrict to specific emails</label>
+          <div class="lnk-reveal" data-reveal="sldrestrict" {% if not link.allowed_emails %}hidden{% endif %}>
+            <textarea name="allowed_emails" rows="3" placeholder="john@company.com, sarah@company.com">{{ link.allowed_emails|join:", " }}</textarea>
+            <div class="hint">Only these addresses can verify &amp; open the link. One per line or comma-separated.</div>
+          </div>
         </div>
         <div class="lnk-row">
           <div class="lnk-main"><div class="lnk-t">Preview only</div>
@@ -186,6 +193,8 @@
     document.getElementById('sldClearPwd').value = pwdOn ? '' : 'on';
     if(!(document.getElementById('sldExpToggle')||{}).checked){ var ed=form.querySelector('[name="expiry_date"]'); if(ed) ed.value=''; }
     if(!(document.getElementById('sldLimitToggle')||{}).checked){ var dl=form.querySelector('[name="download_limit"]'); if(dl) dl.value=''; }
+    // Restrict only applies when verification is on.
+    if(!(document.getElementById('sldVerify')||{}).checked){ var r=document.getElementById('sldRestrict'); if(r) r.checked=false; }
   });
 })();
 </script>
