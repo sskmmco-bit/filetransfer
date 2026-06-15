@@ -60,9 +60,14 @@
     .brand .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--accent),#9ccb7e);
       display:flex;align-items:center;justify-content:center;}
     .btn-upload{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
-      background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:0;border-radius:10px;
+      background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:0;border-radius:999px;
       padding:11px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:14px;}
     .btn-upload:hover{filter:brightness(1.06);text-decoration:none;color:#fff;}
+    /* In the dark sidebar, the upload button is an outlined green pill (it reads
+       well on the dark background); on light pages it stays a solid green pill. */
+    .side .btn-upload{background:transparent;border:2px solid var(--accent);
+      transition:background .15s,border-color .15s;}
+    .side .btn-upload:hover{background:var(--accent);border-color:var(--accent);filter:none;}
 
     /* ---------- nav ---------- */
     .nav-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--side-muted);
@@ -139,7 +144,7 @@
     .ef .sel-wrap .sel-btn,.uw .sel-wrap .sel-btn,.uf .sel-wrap .sel-btn,.gf .sel-wrap .sel-btn,.rf .sel-wrap .sel-btn{border-color:#d4ddca;border-radius:10px;}
     .toolbar .sel-wrap{width:auto;min-width:160px;}
     button,.btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:0;
-      padding:10px 18px;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;}
+      padding:10px 18px;border-radius:999px;font-size:14px;font-weight:600;cursor:pointer;}
     button:hover,.btn:hover{filter:brightness(1.06);}
     .sel-list .sel-opt{background:transparent;color:var(--ink);border:0;padding:9px 12px;border-radius:8px;
       font-size:14px;font-weight:400;width:100%;text-align:left;}
