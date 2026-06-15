@@ -27,7 +27,7 @@
       <span style="flex:1;"></span>
       <button type="button" id="bulkShareBtn" class="btn-sm">↗ Share selected</button>
       <button type="submit" id="zipBtn" class="btn-ghost btn-sm" formaction="{% url 'files:download_zip' %}">⬇ Download ZIP</button>
-      <button type="submit" id="bulkDelBtn" class="btn-danger btn-sm" formaction="{% url 'files:bulk_delete' %}">🗑 Delete selected</button>
+      <button type="submit" id="bulkDelBtn" class="btn-danger btn-sm" formaction="{% url 'files:bulk_delete' %}">🗑 Move to trash</button>
     </div>
     {% if view == 'grid' %}
     <div class="file-grid">
@@ -217,9 +217,9 @@
     e.preventDefault();
     var n = selectedCount(); if(!n) return;
     confirmAction({
-      title: 'Delete ' + n + ' file' + (n > 1 ? 's' : '') + '?',
-      message: 'The selected file' + (n > 1 ? 's' : '') + ' will be removed. This cannot be undone.',
-      confirmLabel: 'Delete', danger: true,
+      title: 'Move ' + n + ' file' + (n > 1 ? 's' : '') + ' to trash?',
+      message: 'The selected file' + (n > 1 ? 's' : '') + ' will be moved to the trash. An administrator can restore ' + (n > 1 ? 'them' : 'it') + ' or delete ' + (n > 1 ? 'them' : 'it') + ' permanently.',
+      confirmLabel: 'Move to trash', danger: true,
       onConfirm: function(){ form.action = delBtn.getAttribute('formaction'); form.submit(); }
     });
   });
@@ -228,9 +228,9 @@
   document.querySelectorAll('.js-del').forEach(function(b){
     b.addEventListener('click', function(){
       confirmAction({
-        title: 'Delete file?',
-        message: 'Delete "' + b.dataset.name + '"? This cannot be undone.',
-        confirmLabel: 'Delete', danger: true,
+        title: 'Move to trash?',
+        message: 'Move "' + b.dataset.name + '" to the trash? An administrator can restore it or delete it permanently.',
+        confirmLabel: 'Move to trash', danger: true,
         onConfirm: function(){ var f = document.getElementById('delForm'); f.action = b.dataset.url; f.submit(); }
       });
     });

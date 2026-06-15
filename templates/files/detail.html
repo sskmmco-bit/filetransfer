@@ -179,7 +179,7 @@
         <form method="post" action="{% url 'files:delete' uuid=file.uuid %}" id="fdDelForm">
           {% csrf_token %}
           <button type="button" class="fd-del"
-                  onclick="confirmAction({title:'Delete file?',message:'Delete “{{ file.display_name|escapejs }}”? The stored file is removed; the record is kept for audit.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('fdDelForm').submit();}})">Delete this file</button>
+                  onclick="confirmAction({title:'Move to trash?',message:'Move “{{ file.display_name|escapejs }}” to the trash? An administrator can restore it or delete it permanently.',confirmLabel:'Move to trash',danger:true,onConfirm:function(){document.getElementById('fdDelForm').submit();}})">Move to trash</button>
         </form>
       </div>
       {% endif %}

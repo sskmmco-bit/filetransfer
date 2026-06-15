@@ -43,6 +43,9 @@ class FileStatus(models.TextChoices):
     UPLOADING = "uploading", "Uploading"
     PENDING_METADATA = "pending_metadata", "Pending metadata"
     ACTIVE = "active", "Active"
+    # TRASHED keeps the row AND the stored object — recoverable from the admin
+    # Trash. DELETED is terminal: the object is purged, only the audit row remains.
+    TRASHED = "trashed", "In trash"
     DELETED = "deleted", "Deleted"
 
 
@@ -108,7 +111,12 @@ class StoredFile(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     uploaded_at = models.DateTimeField(null=True, blank=True)  # set on activation
     updated_at = models.DateTimeField(auto_now=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)  # set when trashed
+    # Who sent it to trash (null = system, e.g. retention/expiry cleanup).
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="trashed_files",
+    )
 
     class Meta:
         db_table = "files_stored_file"
@@ -124,6 +132,10 @@ class StoredFile(models.Model):
     @property
     def is_active(self) -> bool:
         return self.status == FileStatus.ACTIVE
+
+    @property
+    def is_trashed(self) -> bool:
+        return self.status == FileStatus.TRASHED
 
     @property
     def display_name(self) -> str:

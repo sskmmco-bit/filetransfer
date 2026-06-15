@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% load file_extras %}
+{% block title %}Trash — Admin{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Trash</h1>
+  <div class="sub"><a href="{% url 'core:console_home' %}">&larr; Admin console</a> · Deleted files are kept here and can be restored. Permanently deleting removes the stored object for good.</div></div>
+
+<div class="toolbar">
+  <form method="get" class="toolbar-form" style="flex-wrap:wrap;">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search files / owners…">
+    <button class="btn-sm" type="submit">Search</button>
+  </form>
+  <div style="flex:1;"></div>
+  {% if page.paginator.count %}
+  <span class="hint" style="align-self:center;margin-right:10px;">{{ trash_count }} file(s) · {{ total_bytes|filesizeformat }}</span>
+  <button type="button" class="btn-sm" id="emptyTrashBtn" style="background:var(--red-bg);color:var(--red);border:1px solid #f3c9c4;">Empty trash</button>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="flist">
+    <div class="flist-head" style="grid-template-columns:1fr 140px 130px 90px 150px 120px;">
+      <span>Name</span><span>Owner</span><span>Deleted by</span>
+      <span class="h-size">Size</span><span class="h-date">Deleted</span>
+      <span style="text-align:right;">Actions</span>
+    </div>
+    {% for f in page %}
+    <div class="frow" style="grid-template-columns:1fr 140px 130px 90px 150px 120px;">
+      <div class="fmain">
+        <div class="fic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</div>
+        <div class="fmeta"><span class="fname">{{ f.display_name }}</span></div>
+      </div>
+      <div class="fsize" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ f.owner }}</div>
+      <div class="fsize" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ f.deleted_by|default:"System" }}</div>
+      <div class="fsize">{{ f.size|filesizeformat }}</div>
+      <div class="fdate">{{ f.deleted_at|date:"M j, H:i"|default:"—" }}</div>
+      <div class="factions">
+        <button type="button" class="iaction js-restore" data-url="{% url 'core:manage_trash_restore' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Restore">
+          <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.3M3 3v4h4"/></svg></button>
+        <button type="button" class="iaction danger js-purge" data-url="{% url 'core:manage_trash_purge' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete permanently">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
+      </div>
+    </div>
+    {% empty %}
+    <div class="fempty"><div class="big">🗑️</div><p>Trash is empty.</p></div>
+    {% endfor %}
+  </div>
+</div>
+{% include "core/console/_pager.html" %}
+
+<form id="trashForm" method="post" style="display:none;">{% csrf_token %}</form>
+<form id="emptyTrashForm" method="post" action="{% url 'core:manage_trash_empty' %}" style="display:none;">{% csrf_token %}</form>
+<script>
+(function(){
+  function submitTo(url){ var f=document.getElementById('trashForm'); f.action=url; f.submit(); }
+  document.querySelectorAll('.js-restore').forEach(function(b){
+    b.addEventListener('click',function(){
+      confirmAction({
+        title:'Restore file?',
+        message:'Restore "'+b.dataset.name+'" back to the owner’s files?',
+        confirmLabel:'Restore',
+        onConfirm:function(){ submitTo(b.dataset.url); }
+      });
+    });
+  });
+  document.querySelectorAll('.js-purge').forEach(function(b){
+    b.addEventListener('click',function(){
+      confirmAction({
+        title:'Delete permanently?',
+        message:'Permanently delete "'+b.dataset.name+'"? The stored file is removed for good and cannot be recovered.',
+        confirmLabel:'Delete forever', danger:true,
+        onConfirm:function(){ submitTo(b.dataset.url); }
+      });
+    });
+  });
+  var empty=document.getElementById('emptyTrashBtn');
+  if(empty){ empty.addEventListener('click',function(){
+    confirmAction({
+      title:'Empty trash?',
+      message:'Permanently delete ALL files in the trash? This removes every stored object for good and cannot be undone.',
+      confirmLabel:'Empty trash', danger:true,
+      onConfirm:function(){ document.getElementById('emptyTrashForm').submit(); }
+    });
+  }); }
+})();
+</script>
+{% endblock %}

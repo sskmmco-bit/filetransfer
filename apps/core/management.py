@@ -320,7 +320,73 @@ def manage_file_delete(request, uuid):
     if not (request.user.is_authenticated and request.user.is_admin):
         raise PermissionDenied("Administrator access required.")
     sf = get_object_or_404(StoredFile, uuid=uuid)
-    if request.method == "POST" and sf.status != FileStatus.DELETED:
+    if request.method == "POST" and sf.status not in (FileStatus.DELETED, FileStatus.TRASHED):
         services.soft_delete_stored_file(sf.pk, reason="admin console", actor=request.user)
-        messages.success(request, f"'{sf.display_name}' deleted.")
+        messages.success(request, f"'{sf.display_name}' moved to trash.")
     return redirect("core:manage_files")
+
+
+# ---------------------------------------------------------------------------
+# Trash (recoverable deletes) — admin restores or permanently removes
+# ---------------------------------------------------------------------------
+def manage_trash(request):
+    from apps.files.models import FileStatus, StoredFile
+
+    if not (request.user.is_authenticated and request.user.is_admin):
+        raise PermissionDenied("Administrator access required.")
+    qs = (
+        StoredFile.objects.filter(status=FileStatus.TRASHED)
+        .select_related("owner", "deleted_by")
+        .order_by("-deleted_at")
+    )
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(Q(original_filename__icontains=q) | Q(title__icontains=q)
+                       | Q(owner__username__icontains=q))
+    total_bytes = sum(qs.values_list("size", flat=True))
+    page = Paginator(qs, 25).get_page(request.GET.get("page"))
+    return render(request, "core/console/trash.html", {
+        "page": page, "q": q, "total_bytes": total_bytes, "trash_count": qs.count(),
+    })
+
+
+def manage_trash_restore(request, uuid):
+    from apps.files import services
+    from apps.files.models import FileStatus, StoredFile
+
+    if not (request.user.is_authenticated and request.user.is_admin):
+        raise PermissionDenied("Administrator access required.")
+    sf = get_object_or_404(StoredFile, uuid=uuid)
+    if request.method == "POST" and sf.status == FileStatus.TRASHED:
+        services.restore_stored_file(sf.pk, actor=request.user)
+        messages.success(request, f"'{sf.display_name}' restored.")
+    return redirect("core:manage_trash")
+
+
+def manage_trash_purge(request, uuid):
+    from apps.files import services
+    from apps.files.models import FileStatus, StoredFile
+
+    if not (request.user.is_authenticated and request.user.is_admin):
+        raise PermissionDenied("Administrator access required.")
+    sf = get_object_or_404(StoredFile, uuid=uuid)
+    if request.method == "POST" and sf.status == FileStatus.TRASHED:
+        name = sf.display_name
+        services.purge_stored_file(sf.pk, reason="admin trash", actor=request.user)
+        messages.success(request, f"'{name}' permanently deleted.")
+    return redirect("core:manage_trash")
+
+
+def manage_trash_empty(request):
+    """Permanently delete every trashed file in one action."""
+    from apps.files import services
+    from apps.files.models import FileStatus, StoredFile
+
+    if not (request.user.is_authenticated and request.user.is_admin):
+        raise PermissionDenied("Administrator access required.")
+    if request.method == "POST":
+        ids = list(StoredFile.objects.filter(status=FileStatus.TRASHED).values_list("pk", flat=True))
+        for pk in ids:
+            services.purge_stored_file(pk, reason="emptied trash", actor=request.user)
+        messages.success(request, f"Trash emptied — {len(ids)} file(s) permanently deleted.")
+    return redirect("core:manage_trash")

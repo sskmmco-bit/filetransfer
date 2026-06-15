@@ -109,7 +109,9 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
   .uw-link .mini:hover{background:#f0f1ff;}
   /* resume incomplete uploads banner */
   .uw-resume{border:1px solid #f6dca4;background:#fffaf0;border-radius:12px;padding:12px 14px;margin-bottom:14px;}
-  .uw-resume-h{font-weight:600;font-size:13px;color:#b4730a;margin-bottom:8px;display:flex;align-items:center;gap:7px;}
+  .uw-resume-h{font-weight:600;font-size:13px;color:#b4730a;margin-bottom:4px;display:flex;align-items:center;gap:7px;}
+  .uw-resume-note{font-size:11.5px;line-height:1.5;color:#9a6a14;margin-bottom:8px;}
+  .uw-resume-note b{color:#7a5210;}
   .uw-rrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #f3e4c4;}
   .uw-rrow:first-of-type{border-top:0;}
   .uw-rrow .meta{flex:1;min-width:0;}
@@ -525,13 +527,14 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     const liveKeys = new Set(jobs.map(j=>j.name+'::'+j.size));
     const show = items.filter(it=>!liveKeys.has(it.filename+'::'+it.declared_size));
     if(!show.length) return;
-    box.innerHTML='<div class="uw-resume-h">⏳ Resume incomplete uploads ('+show.length+')</div>';
+    box.innerHTML='<div class="uw-resume-h">⏳ Resume incomplete uploads ('+show.length+')</div>'+
+      '<div class="uw-resume-note">Your browser doesn’t keep file contents after the page reloads, so picking the <b>same file</b> is required. It continues from where it stopped — the part already uploaded is <b>not</b> sent again.</div>';
     show.forEach(it=>{
       const pctv=Math.round((it.received/(it.declared_size||1))*100);
       const row=document.createElement('div'); row.className='uw-rrow';
       row.innerHTML='<div class="meta"><div class="nm"></div>'+
-        '<div class="sub">'+human(it.received)+' of '+human(it.declared_size)+' uploaded · '+pctv+'% · re-select the file to continue</div></div>'+
-        '<button type="button" class="resume">Resume</button>'+
+        '<div class="sub">'+pctv+'% done · '+human(it.received)+' of '+human(it.declared_size)+' · resumes from here, won’t re-upload</div></div>'+
+        '<button type="button" class="resume" title="Pick the same file to continue from '+pctv+'%">Resume from '+pctv+'%</button>'+
         '<button type="button" class="discard">Discard</button>';
       row.querySelector('.nm').textContent=it.filename;
       row.querySelector('.resume').addEventListener('click', ()=>{ pendingResume={it,row}; $('uwResumeInput').value=''; $('uwResumeInput').click(); });
@@ -549,7 +552,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     const f=e.target.files[0]; const pr=pendingResume; pendingResume=null;
     if(!f || !pr) return;
     if(f.name!==pr.it.filename || f.size!==pr.it.declared_size){
-      alert('That file doesn’t match. Expected "'+pr.it.filename+'" ('+human(pr.it.declared_size)+').');
+      alert('That’s a different file, so it can’t resume.\n\nExpected: "'+pr.it.filename+'" ('+human(pr.it.declared_size)+')\nYou picked: "'+f.name+'" ('+human(f.size)+')\n\nPick the exact same file to continue from where it stopped.');
       return;
     }
     engine.add({id:newId(), name:f.name, size:f.size, file:f, token:pr.it.token, sent:pr.it.received, partSize:pr.it.part_size});

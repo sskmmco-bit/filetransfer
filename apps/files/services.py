@@ -223,19 +223,97 @@ def reserve_download_slot(stored_file_id: int) -> StoredFile | None:
 
 @transaction.atomic
 def soft_delete_stored_file(stored_file_id: int, *, reason: str = "", actor=None) -> StoredFile:
-    """Soft-delete an active file (§5.6.2): remove the MinIO object(s) but keep
-    the row and audit history. Idempotent."""
+    """Move an active file to Trash (§5.6.2): the row AND the stored object are
+    KEPT so the file can be restored; only public sharing is withdrawn. Permanent
+    removal of the object happens later via ``purge_stored_file``. Idempotent."""
+    from apps.audit.models import ActivityAction, ActivityLog
+
+    sf = StoredFile.objects.select_for_update().get(pk=stored_file_id)
+    if sf.status in (FileStatus.TRASHED, FileStatus.DELETED):
+        return sf
+
+    # Drafts / in-flight uploads (PENDING_METADATA, UPLOADING) were never shared
+    # and have no final stored object — restoring one to ACTIVE would be broken,
+    # so discard them outright instead of parking them in the recoverable trash.
+    if sf.status != FileStatus.ACTIVE:
+        for key in (sf.temp_key, sf.storage_key, sf.thumbnail_key):
+            if key:
+                storage.delete_object(key)
+        sf.status = FileStatus.DELETED
+        sf.deleted_at = timezone.now()
+        sf.is_public = False
+        sf.public_token = ""
+        sf.save(update_fields=["status", "deleted_at", "is_public",
+                               "public_token", "updated_at"])
+        ActivityLog.objects.create(
+            actor=actor if (actor and getattr(actor, "pk", None)) else None,
+            action=ActivityAction.DELETE,
+            message=f"Discarded draft '{sf.display_name}'" + (f": {reason}" if reason else ""),
+        )
+        return sf
+
+    # Withdraw public exposure while in trash — but keep the object so a restore
+    # can put it back. Live share links stop resolving (they only serve ACTIVE).
+    sf.status = FileStatus.TRASHED
+    sf.deleted_at = timezone.now()
+    sf.deleted_by = actor if (actor and getattr(actor, "pk", None)) else None
+    sf.is_public = False
+    sf.public_token = ""
+    sf.save(update_fields=["status", "deleted_at", "deleted_by", "is_public",
+                           "public_token", "updated_at"])
+
+    ActivityLog.objects.create(
+        actor=actor if (actor and getattr(actor, "pk", None)) else None,
+        action=ActivityAction.DELETE,
+        message=f"Moved '{sf.display_name}' to trash" + (f": {reason}" if reason else ""),
+    )
+    return sf
+
+
+@transaction.atomic
+def restore_stored_file(stored_file_id: int, *, actor=None) -> StoredFile:
+    """Restore a trashed file back to ACTIVE. The object was never removed, so
+    this just flips the status. No-op if the file isn't in trash."""
+    from apps.audit.models import ActivityAction, ActivityLog
+
+    sf = StoredFile.objects.select_for_update().get(pk=stored_file_id)
+    if sf.status != FileStatus.TRASHED:
+        return sf
+
+    sf.status = FileStatus.ACTIVE
+    sf.deleted_at = None
+    sf.deleted_by = None
+    sf.save(update_fields=["status", "deleted_at", "deleted_by", "updated_at"])
+
+    # Re-establish the denormalised public hints in case the file is still a
+    # member of a live share link (they were cleared when it was trashed).
+    from . import sharelinks
+    sharelinks.sync_file_public_flags([sf])
+
+    ActivityLog.objects.create(
+        actor=actor if (actor and getattr(actor, "pk", None)) else None,
+        action=ActivityAction.DELETE,
+        message=f"Restored '{sf.display_name}' from trash",
+    )
+    return sf
+
+
+@transaction.atomic
+def purge_stored_file(stored_file_id: int, *, reason: str = "", actor=None) -> StoredFile:
+    """Permanently delete a file: remove the MinIO object(s) but keep the row +
+    audit history (terminal DELETED state). Idempotent."""
     from apps.audit.models import ActivityAction, ActivityLog
 
     sf = StoredFile.objects.select_for_update().get(pk=stored_file_id)
     if sf.status == FileStatus.DELETED:
         return sf
 
-    storage.delete_object(sf.storage_key)
+    if sf.storage_key:
+        storage.delete_object(sf.storage_key)
     if sf.thumbnail_key:
         storage.delete_object(sf.thumbnail_key)
     sf.status = FileStatus.DELETED
-    sf.deleted_at = timezone.now()
+    sf.deleted_at = sf.deleted_at or timezone.now()
     sf.is_public = False
     sf.public_token = ""
     sf.save(update_fields=["status", "deleted_at", "is_public", "public_token", "updated_at"])
@@ -243,7 +321,7 @@ def soft_delete_stored_file(stored_file_id: int, *, reason: str = "", actor=None
     ActivityLog.objects.create(
         actor=actor if (actor and getattr(actor, "pk", None)) else None,
         action=ActivityAction.DELETE,
-        message=f"Soft-deleted '{sf.display_name}'" + (f": {reason}" if reason else ""),
+        message=f"Permanently deleted '{sf.display_name}'" + (f": {reason}" if reason else ""),
     )
     return sf
 

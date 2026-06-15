@@ -44,8 +44,11 @@
       <div class="factions">
         <a class="iaction" href="{% url 'files:detail' uuid=f.uuid %}" title="View">
           <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
-        {% if f.status != "deleted" %}
-        <button type="button" class="iaction danger js-fdel" data-url="{% url 'core:manage_file_delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
+        {% if f.status == "trashed" %}
+        <a class="iaction" href="{% url 'core:manage_trash' %}" title="In trash — manage">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></a>
+        {% elif f.status != "deleted" %}
+        <button type="button" class="iaction danger js-fdel" data-url="{% url 'core:manage_file_delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Move to trash">
           <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
         {% endif %}
       </div>
@@ -63,9 +66,9 @@
   document.querySelectorAll('.js-fdel').forEach(function(b){
     b.addEventListener('click',function(){
       confirmAction({
-        title:'Delete file?',
-        message:'Soft-delete "'+b.dataset.name+'"? The stored object is removed; the record is kept for audit.',
-        confirmLabel:'Delete', danger:true,
+        title:'Move to trash?',
+        message:'Move "'+b.dataset.name+'" to the trash? It can be restored from there, or permanently deleted later.',
+        confirmLabel:'Move to trash', danger:true,
         onConfirm:function(){ var f=document.getElementById('fdelForm'); f.action=b.dataset.url; f.submit(); }
       });
     });

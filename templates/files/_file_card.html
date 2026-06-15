@@ -28,7 +28,7 @@ Images show a thumbnail (files:thumb); other types show a coloured extension chi
       <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></a>
     {% endif %}
     {% if can_delete %}
-    <button type="button" class="iaction danger js-del" data-url="{% url 'files:delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Delete">
+    <button type="button" class="iaction danger js-del" data-url="{% url 'files:delete' uuid=f.uuid %}" data-name="{{ f.display_name }}" title="Move to trash">
       <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
     {% endif %}
   </div>

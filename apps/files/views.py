@@ -485,7 +485,7 @@ def my_uploads(request):
     # real, finished files (PENDING_METADATA drafts + ACTIVE) belong in My Files.
     qs = (
         StoredFile.objects.filter(owner=request.user)
-        .exclude(status__in=[FileStatus.DELETED, FileStatus.UPLOADING])
+        .exclude(status__in=[FileStatus.DELETED, FileStatus.TRASHED, FileStatus.UPLOADING])
         .prefetch_related("categories")
         .annotate(
             n_assign=Count("assignments", distinct=True),
@@ -524,7 +524,7 @@ def starred(request):
 
     base = (
         StoredFile.objects.filter(stars__user=request.user)
-        .exclude(status__in=[FileStatus.DELETED, FileStatus.UPLOADING])
+        .exclude(status__in=[FileStatus.DELETED, FileStatus.TRASHED, FileStatus.UPLOADING])
         .select_related("owner")
         .prefetch_related("categories")
         .annotate(
@@ -808,7 +808,9 @@ def share_link_detail(request, token):
     from apps.audit.models import DownloadEvent, ShareLinkView
 
     link = get_object_or_404(ShareLink, token=token, created_by=request.user)
-    files = link.files.exclude(status=FileStatus.DELETED).order_by("created_at")
+    files = link.files.exclude(
+        status__in=[FileStatus.DELETED, FileStatus.TRASHED]
+    ).order_by("created_at")
 
     # Combined activity feed: who viewed / downloaded, newest first (§5.4).
     activity = []

@@ -19,6 +19,12 @@ urlpatterns = [
     path("console/files/", management.manage_files, name="manage_files"),
     path("console/files/<uuid:uuid>/delete/", management.manage_file_delete, name="manage_file_delete"),
 
+    # Trash (recoverable deletes) — must precede the generic <slug:key> routes
+    path("console/trash/", management.manage_trash, name="manage_trash"),
+    path("console/trash/empty/", management.manage_trash_empty, name="manage_trash_empty"),
+    path("console/trash/<uuid:uuid>/restore/", management.manage_trash_restore, name="manage_trash_restore"),
+    path("console/trash/<uuid:uuid>/purge/", management.manage_trash_purge, name="manage_trash_purge"),
+
     # Generic CRUD over the resource registry
     path("console/<slug:key>/", management.manage_list, name="manage_list"),
     path("console/<slug:key>/new/", management.manage_edit, name="manage_new"),

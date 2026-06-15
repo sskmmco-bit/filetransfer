@@ -473,6 +473,8 @@
         <svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2"/><path d="M2 20c0-3 3-5 6-5s6 2 6 5"/></svg> Groups</a>
       <a href="{% url 'core:manage_files' %}" class="nav-item {% if vn == 'core:manage_files' %}active{% endif %}">
         <svg viewBox="0 0 24 24"><path d="M4 4h7l2 2h7v12H4z"/></svg> All Files</a>
+      <a href="{% url 'core:manage_trash' %}" class="nav-item {% if vn == 'core:manage_trash' %}active{% endif %}">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg> Trash</a>
       <a href="{% url 'core:console_activity' %}" class="nav-item {% if vn == 'core:console_activity' %}active{% endif %}">
         <svg viewBox="0 0 24 24"><path d="M4 19V5M4 14l5-5 4 4 7-7"/></svg> Audit Logs</a>
       {% if user.is_superadmin %}
