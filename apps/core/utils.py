@@ -30,3 +30,18 @@ def get_client_ip(request) -> str | None:
             return hops[0]
 
     return remote_addr
+
+
+def mask_ip(ip: str | None) -> str:
+    """Partially redact an IP for display in activity feeds."""
+    if not ip:
+        return ""
+    if "." in ip:
+        parts = ip.split(".")
+        if len(parts) == 4:
+            return f"{parts[0]}.{parts[1]}.xxx.xxx"
+    if ":" in ip:
+        parts = ip.split(":")
+        if len(parts) >= 2:
+            return ":".join(parts[:2]) + ":xxxx"
+    return ip

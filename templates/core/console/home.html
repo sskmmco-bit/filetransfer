@@ -39,6 +39,24 @@
   .acard .ic svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
   .acard .nm{font-weight:600;font-size:14px;}
   .acard .ds{color:var(--muted);font-size:12px;margin-top:1px;}
+  .acard .txt{flex:1;min-width:0;}
+  .acard .cnt{margin-left:auto;font-weight:700;font-size:20px;color:var(--ink);line-height:1;flex:none;}
+
+  /* recent activity feed */
+  .afeed{margin-top:8px;}
+  .afrow{display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid #f1f3f9;}
+  .afrow:last-child{border-bottom:0;}
+  .afdot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex:none;background:#94a3b8;}
+  .afdot.upload{background:#10b981;} .afdot.download{background:#6366f1;}
+  .afdot.delete{background:#ef4444;} .afdot.login{background:#06b6d4;}
+  .afdot.login_failed{background:#ef4444;} .afdot.logout{background:#94a3b8;}
+  .afdot.settings_changed{background:#f59e0b;} .afdot.user_created{background:#8b5cf6;}
+  .afmain{flex:1;min-width:0;}
+  .afmsg{font-size:13.5px;color:var(--ink);font-weight:500;}
+  .afmeta{color:var(--muted);font-size:12px;margin-top:1px;}
+  .aftime{color:var(--muted);font-size:12px;white-space:nowrap;flex:none;}
+  .af-head{display:flex;align-items:center;justify-content:space-between;}
+  .af-head .sw-h{margin:0;}
   @media (max-width:768px){
     .sw-legend{grid-template-columns:1fr;gap:10px;}
     .sw-cons{flex-wrap:wrap;gap:10px;}
@@ -107,32 +125,59 @@
   </div>
 </div>
 
+<!-- Recent activity -->
+<div class="sw-card" style="margin-bottom:20px;">
+  <div class="af-head">
+    <div class="sw-h">Recent activity</div>
+    <a href="{% url 'core:console_activity' %}" style="font-weight:600;font-size:13px;">View all →</a>
+  </div>
+  <div class="sw-sub">Latest actions across the system</div>
+  <div class="afeed">
+    {% for e in recent_activity %}
+    <div class="afrow">
+      <div class="afdot {{ e.action }}"></div>
+      <div class="afmain">
+        <div class="afmsg">{{ e.message|default:e.get_action_display }}</div>
+        <div class="afmeta">{{ e.actor|default:"System" }} · {{ e.get_action_display }}</div>
+      </div>
+      <div class="aftime" title="{{ e.created_at|date:'Y-m-d H:i:s' }}">{{ e.created_at|date:"M j, g:i A" }}</div>
+    </div>
+    {% empty %}<p class="hint">No activity recorded yet.</p>{% endfor %}
+  </div>
+</div>
+
 <!-- Manage -->
 <h2 style="font-size:16px;margin:0 0 12px;">Manage</h2>
 <div class="acards" style="margin-bottom:24px;">
   <a class="acard" href="{% url 'core:manage_list' key='users' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3.3 3-5.5 6-5.5s6 2.2 6 5.5"/><circle cx="18" cy="9" r="2.6"/><path d="M16.5 14.5c2.2.3 4 1.9 4 4.5"/></svg></div>
-    <div><div class="nm">Users</div><div class="ds">Accounts &amp; quotas</div></div></a>
+    <div class="txt"><div class="nm">Users</div><div class="ds">{{ counts.users }} account{{ counts.users|pluralize }}</div></div>
+    <div class="cnt">{{ counts.users }}</div></a>
   <a class="acard" href="{% url 'core:manage_list' key='groups' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6"/></svg></div>
-    <div><div class="nm">Groups</div><div class="ds">Shared spaces</div></div></a>
+    <div class="txt"><div class="nm">Groups</div><div class="ds">{{ counts.groups }} group{{ counts.groups|pluralize }}</div></div>
+    <div class="cnt">{{ counts.groups }}</div></a>
   {% if user.is_superadmin %}
   <a class="acard" href="{% url 'core:manage_list' key='roles' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div>
-    <div><div class="nm">Roles</div><div class="ds">Permissions</div></div></a>
+    <div class="txt"><div class="nm">Roles</div><div class="ds">{{ counts.roles }} role{{ counts.roles|pluralize }}</div></div>
+    <div class="cnt">{{ counts.roles }}</div></a>
   <a class="acard" href="{% url 'core:manage_settings' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 00-1.7-1L14.5 2h-4l-.4 2.6a7 7 0 00-1.7 1l-2.3-1-2 3.4L4 11a7 7 0 000 2l-2 1.5 2 3.4 2.3-1a7 7 0 001.7 1l.4 2.6h4l.4-2.6a7 7 0 001.7-1l2.3 1 2-3.4L19 13a7 7 0 00.1-1z"/></svg></div>
-    <div><div class="nm">Site settings</div><div class="ds">SMTP / LDAP / quota</div></div></a>
+    <div class="txt"><div class="nm">Site settings</div><div class="ds">SMTP / LDAP / quota</div></div></a>
   {% endif %}
   <a class="acard" href="{% url 'core:manage_list' key='categories' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 7l2-3h6l2 3h6v12H3z"/></svg></div>
-    <div><div class="nm">Categories</div><div class="ds">File tags</div></div></a>
+    <div class="txt"><div class="nm">Categories</div><div class="ds">{{ counts.categories }} categor{{ counts.categories|pluralize:"y,ies" }}</div></div>
+    <div class="cnt">{{ counts.categories }}</div></a>
   <a class="acard" href="{% url 'core:manage_list' key='custom-fields' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg></div>
-    <div><div class="nm">Custom fields</div><div class="ds">Metadata schema</div></div></a>
+    <div class="txt"><div class="nm">Custom fields</div><div class="ds">{{ counts.custom_fields }} field{{ counts.custom_fields|pluralize }}</div></div>
+    <div class="cnt">{{ counts.custom_fields }}</div></a>
   <a class="acard" href="{% url 'core:manage_files' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h7l2 2h7v10H4z"/></svg></div>
-    <div><div class="nm">All files</div><div class="ds">Every upload</div></div></a>
+    <div class="txt"><div class="nm">All files</div><div class="ds">{{ counts.files }} active file{{ counts.files|pluralize }}</div></div>
+    <div class="cnt">{{ counts.files }}</div></a>
 </div>
 
 <!-- Audit & logs -->
@@ -146,9 +191,6 @@
     <div><div class="nm">Login attempts</div><div class="ds">{{ stats.failed_logins }} failed</div></div></a>
   <a class="acard" href="{% url 'core:console_downloads' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></div>
-    <div><div class="nm">Download events</div><div class="ds">{{ stats.downloads }} total</div></div></a>
-  <a class="acard" href="/admin/" target="_blank" rel="noopener">
-    <div class="ic"><svg viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M10 5H5a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-5"/></svg></div>
-    <div><div class="nm">Django admin ↗</div><div class="ds">Advanced</div></div></a>
+    <div class="txt"><div class="nm">Download events</div><div class="ds">{{ stats.downloads }} total</div></div></a>
 </div>
 {% endblock %}

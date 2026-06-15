@@ -286,6 +286,18 @@ class ShareLink(models.Model):
     def download_limit_reached(self) -> bool:
         return bool(self.download_limit is not None and self.download_count >= self.download_limit)
 
+    @property
+    def downloads_remaining(self) -> int | None:
+        if self.download_limit is None:
+            return None
+        return max(0, self.download_limit - self.download_count)
+
+    @property
+    def days_remaining(self) -> int | None:
+        if not self.expires_at:
+            return None
+        return (self.expires_at - timezone.localdate()).days
+
     def build_url(self, request=None) -> str:
         """Canonical short URL. We store only the token and build the URL on
         demand from PUBLIC_BASE_URL (or the request host) — domain-safe."""

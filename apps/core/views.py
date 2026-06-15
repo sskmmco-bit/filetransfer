@@ -196,7 +196,30 @@ def console_home(request):
         "breakdown": breakdown,
         "top_consumers": top_consumers,
     }
-    return render(request, "core/console/home.html", {"stats": stats, "storage": storage})
+
+    # Counts for the "Manage" cards so each tile is informative at a glance.
+    from apps.accounts.models import Group, Role
+    from apps.config.models import CustomField
+    from apps.files.models import Category
+
+    counts = {
+        "users": User.objects.count(),
+        "groups": Group.objects.count(),
+        "roles": Role.objects.count(),
+        "categories": Category.objects.count(),
+        "custom_fields": CustomField.objects.count(),
+        "files": storage["total_files"],
+    }
+
+    # Recent activity feed — the latest meaningful actions, newest first.
+    recent_activity = list(
+        ActivityLog.objects.select_related("actor").order_by("-created_at")[:8]
+    )
+
+    return render(request, "core/console/home.html", {
+        "stats": stats, "storage": storage,
+        "counts": counts, "recent_activity": recent_activity,
+    })
 
 
 @audit_view_required

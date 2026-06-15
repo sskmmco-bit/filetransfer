@@ -364,7 +364,22 @@ def upload_finalize(request):
             download_limit=download_limit,
             allowed_emails=wl,
         )
-        public_links = [{"name": link.name, "url": link.build_url(request)}]
+        manage = request.build_absolute_uri(
+            reverse("files:share_link_detail", args=[link.token])
+        )
+        public_links = [{
+            "name": link.name,
+            "url": link.build_url(request),
+            "token": link.token,
+            "manage_url": manage,
+            "require_email_verify": link.require_email_verify,
+            "allowed_emails": link.allowed_emails,
+            "has_password": link.has_password,
+            "preview_only": not link.allow_download,
+            "download_limit": link.download_limit,
+            "downloads_remaining": link.downloads_remaining,
+            "expires_at": link.expires_at.isoformat() if link.expires_at else None,
+        }]
 
     return JsonResponse({
         "ok": True, "activated": len(files),
@@ -806,11 +821,24 @@ def share_links(request):
 @login_required
 def share_link_detail(request, token):
     from apps.audit.models import DownloadEvent, ShareLinkView
+    from apps.core.utils import mask_ip
 
     link = get_object_or_404(ShareLink, token=token, created_by=request.user)
     files = link.files.exclude(
         status__in=[FileStatus.DELETED, FileStatus.TRASHED]
     ).order_by("created_at")
+
+    def visitor_key(email, ip, user_id=None):
+        if user_id:
+            return f"user:{user_id}"
+        if email:
+            return email.strip().lower()
+        if ip:
+            return f"ip:{ip}"
+        return None
+
+    visitor_keys: set[str] = set()
+    last_access = None
 
     # Combined activity feed: who viewed / downloaded, newest first (§5.4).
     activity = []
@@ -818,17 +846,45 @@ def share_link_detail(request, token):
               .select_related("user", "stored_file")[:100]):
         who = ((d.user.get_full_name() or d.user.username) if d.user
                else (d.visitor_email or "Anonymous visitor"))
-        activity.append({"kind": "download", "who": who, "when": d.created_at,
-                         "file": d.stored_file.display_name if d.stored_file_id else ""})
+        vk = visitor_key(d.visitor_email, d.ip_address, d.user_id)
+        if vk:
+            visitor_keys.add(vk)
+        if last_access is None or d.created_at > last_access:
+            last_access = d.created_at
+        activity.append({
+            "kind": "download",
+            "who": who,
+            "when": d.created_at,
+            "file": d.stored_file.display_name if d.stored_file_id else "",
+            "ip": mask_ip(d.ip_address),
+            "email": d.visitor_email or "",
+            "verified": bool(d.visitor_email),
+            "is_anonymous": not d.user_id and not d.visitor_email,
+        })
     for v in ShareLinkView.objects.filter(share_link=link)[:100]:
-        activity.append({"kind": "view", "who": v.visitor_email or "Anonymous visitor",
-                         "when": v.created_at, "file": ""})
+        vk = visitor_key(v.visitor_email, v.ip_address)
+        if vk:
+            visitor_keys.add(vk)
+        if last_access is None or v.created_at > last_access:
+            last_access = v.created_at
+        activity.append({
+            "kind": "view",
+            "who": v.visitor_email or "Anonymous visitor",
+            "when": v.created_at,
+            "file": "",
+            "ip": mask_ip(v.ip_address),
+            "email": v.visitor_email or "",
+            "verified": bool(v.visitor_email),
+            "is_anonymous": not v.visitor_email,
+        })
     activity.sort(key=lambda a: a["when"], reverse=True)
     activity = activity[:60]
 
     return render(request, "files/share_link_detail.html", {
         "link": link, "files": files, "public_url": link.build_url(request),
         "activity": activity, "preview_url_name": "files:preview",
+        "unique_visitors": len(visitor_keys),
+        "last_access": last_access,
     })
 
 

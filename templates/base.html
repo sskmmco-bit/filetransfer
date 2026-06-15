@@ -119,7 +119,7 @@
       transition:border-color .15s,box-shadow .15s;}
     input:focus,textarea:focus,select:not(.sel-native):focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
     select:not(.sel-native):hover:not(:disabled){border-color:#c5d4bc;}
-    input[type=checkbox]{width:auto;}
+    input[type=checkbox],input[type=radio]{width:auto;}
 
     /* enhanced custom select (replaces native dropdown UI, keeps <select> for forms/JS) */
     .sel-wrap{position:relative;}
@@ -269,6 +269,66 @@
     .lnk-mini:hover{background:#f5f6ff;}
     .lnk-mini.danger{color:var(--red);border-color:#f3c9c4;}
     .lnk-mini.danger:hover{background:#fdf3f2;}
+
+    /* ---- grouped link / share settings ---- */
+    .lnk-group{margin-top:16px;}
+    .lnk-group:first-child{margin-top:0;}
+    .lnk-group-h{font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+      color:var(--muted);font-weight:700;margin-bottom:10px;}
+    .lnk-group .lnk-list{background:#fafbf7;border:1px solid var(--line);border-radius:12px;padding:2px 14px;}
+    .access-modes{display:flex;flex-direction:column;gap:8px;}
+    .access-opt{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border:1px solid var(--line);
+      border-radius:11px;cursor:pointer;background:#fff;transition:border-color .12s,background .12s;}
+    .access-opt:hover{border-color:#c5d4bc;background:#fafbf7;}
+    .access-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft);}
+    .access-opt input{margin-top:3px;flex:none;width:auto;padding:0;border:0;box-shadow:none;}
+    .access-opt > div{flex:1;min-width:0;}
+    .access-opt span{font-weight:600;font-size:14px;display:block;}
+    .access-opt small{display:block;color:var(--muted);font-size:12px;margin-top:2px;font-weight:400;}
+    .uw-pub-banner{display:flex;align-items:center;gap:10px;padding:12px 14px;margin:14px 0 4px;
+      background:var(--green-bg);border:1px solid #b8e6cc;border-radius:11px;font-weight:600;color:#0f7a52;font-size:14px;}
+    .uw-pub-banner::before{content:"🌐";font-size:16px;}
+    /* success screen summary */
+    .uw-done-card{border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:14px;background:#fafbff;}
+    .uw-done-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #eef1f7;font-size:13px;}
+    .uw-done-row:first-child{border-top:0;padding-top:0;}
+    .uw-done-row .k{color:var(--muted);font-weight:600;}
+    .uw-done-row .v{text-align:right;font-weight:500;}
+    .uw-done-perms{display:flex;flex-direction:column;gap:4px;align-items:flex-end;}
+    .uw-done-perms span{color:#0f7a52;font-weight:600;font-size:12px;}
+    .uw-done-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;}
+    .uw-done-actions .btn{flex:1;min-width:100px;text-align:center;}
+    /* link detail dashboard */
+    .sld-hero{margin-bottom:20px;}
+    .sld-hero h1{margin:0 0 10px;font-size:24px;}
+    .sld-status-row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted);}
+    .sld-status-pill{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:14px;
+      padding:6px 14px;border-radius:999px;}
+    .sld-status-pill.live{background:var(--green-bg);color:#0f7a52;}
+    .sld-status-pill.off{background:#eef1f7;color:#64748b;}
+    .sld-status-pill.exp{background:var(--amber-bg);color:#b4730a;}
+    .sld-meta-chip{font-weight:500;}
+    .sld-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+    .sld-kpi .box{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fafbff;}
+    .sld-kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600;}
+    .sld-kpi .v{font-size:26px;font-weight:700;margin-top:4px;line-height:1.1;}
+    .sld-kpi .sub{font-size:12px;color:var(--muted);margin-top:4px;}
+    .sld-prog{height:8px;background:#eef1f7;border-radius:999px;margin-top:10px;overflow:hidden;}
+    .sld-prog i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:999px;}
+    .sld-perf{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .sld-perf .item{padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:#fafbff;}
+    .sld-perf .pk{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600;}
+    .sld-perf .pv{font-size:20px;font-weight:700;margin-top:4px;}
+    .sld-files-compact .sld-frow{padding:8px 0;}
+    .sld-files-empty{font-size:13px;color:var(--muted);margin:0;padding:4px 0;}
+    .sld-act-time{font-size:12px;color:var(--muted);font-weight:600;min-width:72px;flex:none;}
+    .sld-act-who{font-weight:600;font-size:14px;}
+    .sld-act-action{font-size:13px;color:var(--ink);margin-top:1px;}
+    .sld-act-meta{font-size:12px;color:var(--muted);margin-top:3px;}
+    @media (max-width:900px){
+      .sld-kpi{grid-template-columns:1fr 1fr;}
+      .sld-perf{grid-template-columns:1fr;}
+    }
 
     /* ---- shared file list (My Files / Shared with Me / Group space) ---- */
     .flist{display:flex;flex-direction:column;}
@@ -488,8 +548,6 @@
       <a href="{% url 'core:manage_settings' %}" class="nav-item {% if vn == 'core:manage_settings' %}active{% endif %}">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg> Settings</a>
       {% endif %}
-      <a href="/admin/" class="nav-item" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg> Django Admin <span class="nav-ext">↗</span></a>
       {% endif %}
 
       {% if storage_widget %}
