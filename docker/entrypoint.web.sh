@@ -10,8 +10,13 @@ until nc -z "${POSTGRES_HOST}" "${POSTGRES_PORT}"; do
 done
 echo "[entrypoint] postgres is up."
 
-echo "[entrypoint] generating migrations (idempotent) ..."
-python manage.py makemigrations accounts config files notifications audit public core --noinput
+# In production, migrations are committed to the image — skip generation and
+# only apply them. Set DJANGO_SKIP_MAKEMIGRATIONS=1 (the prod env file does) to
+# avoid generating uncommitted schema changes at boot. Dev leaves it unset.
+if [ "${DJANGO_SKIP_MAKEMIGRATIONS:-0}" != "1" ]; then
+  echo "[entrypoint] generating migrations (idempotent) ..."
+  python manage.py makemigrations accounts config files notifications audit public core --noinput
+fi
 
 echo "[entrypoint] applying migrations ..."
 python manage.py migrate --noinput

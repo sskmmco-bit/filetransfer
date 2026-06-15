@@ -5,6 +5,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mmftp}
       POSTGRES_USER: ${POSTGRES_USER:-mmftp}
@@ -21,6 +22,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -31,6 +33,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -62,6 +65,7 @@ services:
 
   web:
     build: .
+    restart: unless-stopped
     command: python manage.py runserver 0.0.0.0:8000
     env_file: .env
     volumes:
@@ -78,6 +82,7 @@ services:
 
   worker:
     build: .
+    restart: unless-stopped
     entrypoint: /app/docker/entrypoint.celery.sh
     command: celery -A mmftp worker -l info
     env_file: .env
@@ -91,6 +96,7 @@ services:
 
   beat:
     build: .
+    restart: unless-stopped
     entrypoint: /app/docker/entrypoint.celery.sh
     command: celery -A mmftp beat -l info
     env_file: .env

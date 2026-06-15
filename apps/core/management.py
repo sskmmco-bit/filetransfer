@@ -99,10 +99,59 @@ def manage_list(request, key):
             cond |= Q(**{f"{f}__icontains": q})
         qs = qs.filter(cond)
     page = Paginator(qs, 25).get_page(request.GET.get("page"))
+    # Users get a purpose-built list: summary cards, avatars, status badges and
+    # storage usage bars. Every other resource uses the generic table.
+    if resource.key == "users":
+        return _render_users_list(request, resource, page, q)
     rows = [{"pk": o.pk, "cells": [_cell(o, a) for _, a in resource.columns]} for o in page]
     return render(request, "core/console/manage_list.html", {
         "resource": resource, "headers": [h for h, _ in resource.columns],
         "rows": rows, "page": page, "q": q,
+    })
+
+
+def _user_initials(u) -> str:
+    """Two-letter avatar initials from the user's name (falls back to username)."""
+    full = (u.get_full_name() or "").strip()
+    parts = full.split()
+    if len(parts) >= 2:
+        return (parts[0][:1] + parts[1][:1]).upper()
+    base = full or u.username
+    return base[:2].upper()
+
+
+def _render_users_list(request, resource, page, q):
+    from apps.accounts.models import RoleSlug
+    from apps.core.views import _human_size
+
+    admin_slugs = (RoleSlug.SUPERADMIN, RoleSlug.ADMIN)
+    rows = []
+    for u in page:
+        eff = u.quota_effective_bytes()
+        rows.append({
+            "pk": u.pk,
+            "initials": _user_initials(u),
+            "name": (u.get_full_name() or u.username).strip(),
+            "username": u.username,
+            "email": u.email,
+            "role": u.role.name if u.role_id else "—",
+            "is_active": u.is_active,
+            "used_human": _human_size(u.storage_used_bytes()),
+            "quota_human": _human_size(eff) if eff else "",
+            "unlimited": eff is None,
+            "pct": u.quota_pct(),
+        })
+
+    # Summary cards reflect the whole user base, not the current search/page.
+    all_users = resource.model.objects.all()
+    stats = {
+        "total": all_users.count(),
+        "active": all_users.filter(is_active=True).count(),
+        "uploaders": all_users.filter(role__slug=RoleSlug.UPLOADER).count(),
+        "admins": all_users.filter(role__slug__in=admin_slugs).count(),
+    }
+    return render(request, "core/console/manage_list_users.html", {
+        "resource": resource, "rows": rows, "page": page, "q": q, "stats": stats,
     })
 
 
