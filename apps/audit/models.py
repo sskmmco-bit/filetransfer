@@ -98,6 +98,14 @@ class DownloadEvent(models.Model):
     )
     visitor_email = models.EmailField(blank=True)
     via_public_link = models.BooleanField(default=False)
+    # The share link this public download came through (null for authorized/legacy).
+    share_link = models.ForeignKey(
+        "files.ShareLink",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="download_events",
+    )
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
 
@@ -109,6 +117,30 @@ class DownloadEvent(models.Model):
     def __str__(self):
         who = self.user or self.visitor_email or "anonymous"
         return f"{who} downloaded {self.stored_file_id} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class ShareLinkView(models.Model):
+    """One row per new-session view of a share link's landing page (§5.4).
+
+    Powers the link's activity feed alongside DownloadEvent. `visitor_email` is
+    set only when the viewer has already verified (tracked links); anonymous
+    public views are recorded with a blank email.
+    """
+
+    share_link = models.ForeignKey(
+        "files.ShareLink", on_delete=models.CASCADE, related_name="views"
+    )
+    visitor_email = models.EmailField(blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = "audit_share_link_view"
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["share_link", "created_at"])]
+
+    def __str__(self):
+        return f"{self.visitor_email or 'anonymous'} viewed link {self.share_link_id}"
 
 
 class CronLog(models.Model):

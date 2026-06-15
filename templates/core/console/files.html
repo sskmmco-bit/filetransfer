@@ -6,9 +6,9 @@
   <div class="sub"><a href="{% url 'core:console_home' %}">&larr; Admin console</a></div></div>
 
 <div class="toolbar">
-  <form method="get" style="display:flex;gap:8px;">
+  <form method="get" class="toolbar-form" style="flex-wrap:wrap;">
     <input type="text" name="q" value="{{ q }}" placeholder="Search files / owners…">
-    <select name="status" onchange="this.form.submit()">
+    <select name="status" onchange="this.form.submit()" style="min-width:140px;">
       <option value="">All statuses</option>
       {% for val, label in statuses %}
         <option value="{{ val }}" {% if status == val %}selected{% endif %}>{{ label }}</option>

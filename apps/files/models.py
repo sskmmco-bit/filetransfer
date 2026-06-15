@@ -198,6 +198,102 @@ class UploadSession(models.Model):
         return len(self.parts) + 1
 
 
+class ShareLink(models.Model):
+    """A public share link — a permission wrapper around one or more files.
+
+    A link is NOT a file: the same file can be covered by several links over
+    time (an HR link, a client link, …), each with its own controls and stats.
+    Settings (password, email-verify, preview-only, expiry, download limit) and
+    the running view/download counters live here, not on the file. The public
+    download flow (`apps/public`) resolves a link by its `token`.
+    """
+
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    name = models.CharField(max_length=120, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="share_links"
+    )
+    files = models.ManyToManyField(
+        StoredFile, through="ShareLinkFile", related_name="share_links"
+    )
+
+    # Link-level controls.
+    expires_at = models.DateField(null=True, blank=True)
+    password_hash = models.CharField(max_length=255, blank=True)  # blank = no password
+    require_email_verify = models.BooleanField(default=False)
+    allow_download = models.BooleanField(default=True)  # False = preview-only
+    download_limit = models.PositiveIntegerField(null=True, blank=True)  # total across files
+
+    # Stats / state.
+    download_count = models.PositiveIntegerField(default=0)
+    view_count = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "files_share_link"
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["created_by", "is_active"])]
+
+    def __str__(self):
+        return self.name or f"link {self.token[:8]}"
+
+    @staticmethod
+    def default_name(n: int) -> str:
+        return f"Link to {n} file{'s' if n != 1 else ''}"
+
+    @property
+    def is_expired(self) -> bool:
+        return bool(self.expires_at and self.expires_at < timezone.localdate())
+
+    @property
+    def is_live(self) -> bool:
+        return self.is_active and not self.is_expired
+
+    @property
+    def has_password(self) -> bool:
+        return bool(self.password_hash)
+
+    @property
+    def access_label(self) -> str:
+        return "tracked" if self.require_email_verify else "public"
+
+    def download_limit_reached(self) -> bool:
+        return bool(self.download_limit is not None and self.download_count >= self.download_limit)
+
+    def build_url(self, request=None) -> str:
+        """Canonical short URL. We store only the token and build the URL on
+        demand from PUBLIC_BASE_URL (or the request host) — domain-safe."""
+        from django.conf import settings as dj_settings
+
+        base = (getattr(dj_settings, "PUBLIC_BASE_URL", "") or "").rstrip("/")
+        if not base and request is not None:
+            base = f"{request.scheme}://{request.get_host()}"
+        return f"{base}/s/{self.token}"
+
+
+class ShareLinkFile(models.Model):
+    """Membership row: one file inside one share link."""
+
+    share_link = models.ForeignKey(
+        ShareLink, on_delete=models.CASCADE, related_name="link_files"
+    )
+    stored_file = models.ForeignKey(
+        StoredFile, on_delete=models.CASCADE, related_name="link_memberships"
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "files_share_link_file"
+        unique_together = (("share_link", "stored_file"),)
+        ordering = ("created_at",)
+
+    def __str__(self):
+        return f"{self.share_link_id} ⊇ {self.stored_file_id}"
+
+
 class StarredFile(models.Model):
     """A user's favourite mark on a file (per-viewer, not global)."""
 

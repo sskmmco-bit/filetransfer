@@ -8,6 +8,7 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("accounts/", include("apps.accounts.urls")),
     path("files/", include("apps.files.urls")),
-    path("public/", include("apps.public.urls")),
+    # Canonical short share-link URL: /s/<token>/ (§5.4).
+    path("s/", include("apps.public.urls")),
     path("", include("apps.core.urls")),
 ]

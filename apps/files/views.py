@@ -26,9 +26,9 @@ from django.views.decorators.http import require_GET, require_POST
 
 from apps.core.utils import get_client_ip
 
-from . import services, storage
+from . import services, sharelinks, storage
 from .forms import DirectUploadForm, MetadataForm
-from .models import FileAssignment, FileStatus, StoredFile, UploadSession
+from .models import FileAssignment, FileStatus, ShareLink, StoredFile, UploadSession
 
 CHUNK_PART_SIZE = services.MIN_PART_SIZE  # client splits large files into >=5 MiB parts
 
@@ -352,21 +352,17 @@ def upload_finalize(request):
 
     public_links = []
     if make_public:
-        # One shared link (bundle) across every file in the upload, with the
-        # chosen access/password/preview controls.
-        token = services.configure_public_link(
-            files,
-            access=data.get("access") or "public",
+        # One share link covering every file in the upload, with the chosen
+        # access/password/preview controls.
+        link = sharelinks.create_link(
+            files, created_by=request.user,
             require_verify=bool(data.get("public_email_verify")),
-            password=(data.get("password") or None),
             allow_download=not bool(data.get("preview_only")),
-            expiry_date=expiry_date,
+            password=(data.get("password") or None),
+            expires_at=expiry_date,
             download_limit=download_limit,
         )
-        bundle_url = request.build_absolute_uri(
-            reverse("public:landing", kwargs={"token": token}))
-        name = files[0].display_name if len(files) == 1 else f"{len(files)} files"
-        public_links = [{"name": name, "url": bundle_url}]
+        public_links = [{"name": link.name, "url": link.build_url(request)}]
 
     return JsonResponse({
         "ok": True, "activated": len(files),
@@ -424,6 +420,12 @@ def edit(request, uuid):
                 recipient_ids=recipient_ids,
                 assigned_by=request.user,
             )
+            # Marking the file public on activation mints a share link for it.
+            if form.cleaned_data.get("is_public"):
+                sharelinks.create_link(
+                    [sf], created_by=request.user,
+                    require_verify=bool(form.cleaned_data.get("public_require_email_verify")),
+                )
             if ajax:
                 return JsonResponse({"ok": True, "redirect": detail_url})
             return redirect("files:detail", uuid=sf.uuid)
@@ -630,6 +632,11 @@ def detail(request, uuid):
            "preview_kind": kind, "preview_url": preview_url}
     if is_owner and sf.is_active:
         ctx.update(_share_context(sf, request.user))
+        # This file's share links (a file can have several), newest first.
+        links = list(sf.share_links.order_by("-created_at"))
+        for link in links:
+            link.abs_url = link.build_url(request)
+        ctx["file_links"] = links
     return render(request, "files/detail.html", ctx)
 
 
@@ -733,48 +740,155 @@ def download(request, uuid):
     return HttpResponseRedirect(url)
 
 
-@login_required
-@require_POST
-def manage_public_link(request, uuid):
-    """Owner manages the public link: enable/save, rotate, or disable (§5.4).
-
-    Settings apply across the whole bundle (every file sharing this token).
-    """
+# ---------------------------------------------------------------------------
+# Share links (first-class entities) — list, detail, CRUD (§5.4)
+# ---------------------------------------------------------------------------
+def _parse_link_settings(src):
+    """Pull link controls from a dict (JSON body or POST). Returns a kwargs dict
+    suitable for sharelinks.create_link/update_link (password uses KEEP sentinel)."""
     from datetime import date
 
-    sf = get_object_or_404(StoredFile, uuid=uuid, owner=request.user, status=FileStatus.ACTIVE)
-    action = request.POST.get("action")
+    def truthy(v):
+        return v in (True, "true", "on", "1", 1)
 
-    if action == "disable":
-        services.disable_public_link(sf)
-        return redirect("files:detail", uuid=sf.uuid)
-
-    bundle = (list(StoredFile.objects.filter(public_token=sf.public_token, owner=request.user))
-              if sf.public_token else [sf])
-
-    access = request.POST.get("access") or "public"
-    require_verify = request.POST.get("require_verify") == "on"
-    allow_download = request.POST.get("preview_only") != "on"
-    if request.POST.get("clear_password") == "on":
-        password = ""               # clear an existing password
-    elif request.POST.get("password"):
-        password = request.POST["password"]   # set a new one
-    else:
-        password = None             # leave unchanged
-    expiry_date = None
-    if request.POST.get("expiry_date"):
+    expires_at = None
+    raw_exp = src.get("expiry_date")
+    if raw_exp:
         try:
-            expiry_date = date.fromisoformat(request.POST["expiry_date"])
-        except ValueError:
-            pass
-    download_limit = int(request.POST["download_limit"]) if request.POST.get("download_limit") else None
+            expires_at = date.fromisoformat(raw_exp)
+        except (ValueError, TypeError):
+            expires_at = None
+    raw_limit = src.get("download_limit")
+    download_limit = int(raw_limit) if raw_limit not in (None, "", False) else None
 
-    services.configure_public_link(
-        bundle, access=access, require_verify=require_verify, password=password,
-        allow_download=allow_download, expiry_date=expiry_date,
-        download_limit=download_limit, rotate=(action == "rotate"),
+    # password: explicit clear flag wins; else a value sets it; else leave (KEEP).
+    if truthy(src.get("clear_password")):
+        password = ""
+    elif src.get("password"):
+        password = src["password"]
+    else:
+        password = sharelinks.KEEP
+
+    return {
+        "name": (src.get("name") or "").strip(),
+        "require_verify": truthy(src.get("require_verify")) or src.get("access") == "tracked",
+        "allow_download": not truthy(src.get("preview_only")),
+        "password": password,
+        "expires_at": expires_at,
+        "download_limit": download_limit,
+    }
+
+
+@login_required
+def share_links(request):
+    """The Shared Links management page — every link the user created (§5.4)."""
+    from django.db.models import Count
+
+    links = (
+        ShareLink.objects.filter(created_by=request.user)
+        .annotate(n_files=Count("link_files", distinct=True))
+        .order_by("-created_at")
     )
-    return redirect("files:detail", uuid=sf.uuid)
+    page = _paginate(request, links)
+    for link in page:  # absolute URL for copy/open (templates can't pass request)
+        link.abs_url = link.build_url(request)
+    return render(request, "files/share_links.html", {"links": page, "page": page})
+
+
+@login_required
+def share_link_detail(request, token):
+    from apps.audit.models import DownloadEvent, ShareLinkView
+
+    link = get_object_or_404(ShareLink, token=token, created_by=request.user)
+    files = link.files.exclude(status=FileStatus.DELETED).order_by("created_at")
+
+    # Combined activity feed: who viewed / downloaded, newest first (§5.4).
+    activity = []
+    for d in (DownloadEvent.objects.filter(share_link=link)
+              .select_related("user", "stored_file")[:100]):
+        who = ((d.user.get_full_name() or d.user.username) if d.user
+               else (d.visitor_email or "Anonymous visitor"))
+        activity.append({"kind": "download", "who": who, "when": d.created_at,
+                         "file": d.stored_file.display_name if d.stored_file_id else ""})
+    for v in ShareLinkView.objects.filter(share_link=link)[:100]:
+        activity.append({"kind": "view", "who": v.visitor_email or "Anonymous visitor",
+                         "when": v.created_at, "file": ""})
+    activity.sort(key=lambda a: a["when"], reverse=True)
+    activity = activity[:60]
+
+    return render(request, "files/share_link_detail.html", {
+        "link": link, "files": files, "public_url": link.build_url(request),
+        "activity": activity, "preview_url_name": "files:preview",
+    })
+
+
+@login_required
+@require_POST
+def share_link_create(request):
+    """Create a new link over the given files (JSON). Returns the link URL."""
+    data = json.loads(request.body or "{}")
+    files = list(StoredFile.objects.filter(
+        uuid__in=data.get("file_uuids", []), owner=request.user, status=FileStatus.ACTIVE))
+    if not files:
+        return JsonResponse({"error": "No accessible files selected."}, status=400)
+    opts = _parse_link_settings(data)
+    # create_link doesn't take the KEEP sentinel — translate to a real value.
+    pwd = opts["password"]
+    link = sharelinks.create_link(
+        files, created_by=request.user, name=opts["name"],
+        require_verify=opts["require_verify"], allow_download=opts["allow_download"],
+        password=(None if pwd is sharelinks.KEEP else (pwd or None)),
+        expires_at=opts["expires_at"], download_limit=opts["download_limit"],
+    )
+    return JsonResponse({"ok": True, "token": link.token, "url": link.build_url(request),
+                         "name": link.name})
+
+
+@login_required
+@require_POST
+def share_link_update(request, token):
+    link = get_object_or_404(ShareLink, token=token, created_by=request.user)
+    src = json.loads(request.body) if request.content_type == "application/json" else request.POST
+    opts = _parse_link_settings(src)
+    sharelinks.update_link(
+        link, name=opts["name"] or sharelinks.KEEP, require_verify=opts["require_verify"],
+        allow_download=opts["allow_download"], password=opts["password"],
+        expires_at=opts["expires_at"], download_limit=opts["download_limit"],
+    )
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True})
+    return redirect("files:share_link_detail", token=link.token)
+
+
+@login_required
+@require_POST
+def share_link_rotate(request, token):
+    link = get_object_or_404(ShareLink, token=token, created_by=request.user)
+    sharelinks.rotate_link(link)
+    return redirect("files:share_link_detail", token=link.token)
+
+
+@login_required
+@require_POST
+def share_link_toggle(request, token):
+    """Disable or enable a link."""
+    link = get_object_or_404(ShareLink, token=token, created_by=request.user)
+    if link.is_active:
+        sharelinks.disable_link(link)
+    else:
+        sharelinks.enable_link(link)
+    nxt = request.POST.get("next")
+    if nxt:
+        return redirect(nxt)
+    return redirect("files:share_link_detail", token=link.token)
+
+
+@login_required
+@require_POST
+def share_link_delete(request, token):
+    link = get_object_or_404(ShareLink, token=token, created_by=request.user)
+    sharelinks.delete_link(link)
+    return redirect("files:share_links")
 
 
 @login_required
@@ -864,16 +978,15 @@ def bulk_share(request):
                 expiry_date = date.fromisoformat(data["expiry_date"])
             except ValueError:
                 pass
-        token = services.configure_public_link(
-            files, access=data.get("access") or "public",
+        link = sharelinks.create_link(
+            files, created_by=request.user,
             require_verify=bool(data.get("require_verify")),
-            password=(data.get("password") or None),
             allow_download=not bool(data.get("preview_only")),
-            expiry_date=expiry_date,
+            password=(data.get("password") or None),
+            expires_at=expiry_date,
             download_limit=int(data["download_limit"]) if data.get("download_limit") else None,
         )
-        public_url = request.build_absolute_uri(
-            reverse("public:landing", kwargs={"token": token}))
+        public_url = link.build_url(request)
 
     if not added_total and not public_url:
         return JsonResponse({"error": "Pick at least one person/group, or enable a public link."}, status=400)

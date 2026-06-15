@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Shared Links — MMFileTransfer{% endblock %}
+{% block content %}
+
+<style>
+  .sl-head,.sl-row{display:grid;align-items:center;gap:12px;
+    grid-template-columns:1fr 70px 70px 90px 110px 90px 150px;padding:0 6px;}
+  .sl-head{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+    padding-bottom:10px;border-bottom:1px solid var(--line);font-weight:600;}
+  .sl-row{padding:13px 6px;border-bottom:1px solid #f1f3f9;border-radius:10px;transition:background .12s;}
+  .sl-row:hover{background:#f7f8fd;}
+  .sl-nm{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sl-nm:hover{color:var(--accent2);}
+  .sl-sub{color:var(--muted);font-size:12px;margin-top:1px;font-family:ui-monospace,Menlo,Consolas,monospace;}
+  .sl-num{color:var(--muted);font-size:14px;}
+  .sl-badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;width:fit-content;}
+  .sl-badge.live{background:var(--green-bg);color:#0f9d6b;}
+  .sl-badge.off{background:#eef1f7;color:#64748b;}
+  .sl-badge.exp{background:var(--amber-bg);color:#b4730a;}
+  .sl-acts{display:flex;align-items:center;gap:6px;justify-content:flex-end;}
+  .iaction.copied{color:#0f9d6b;background:var(--green-bg);}
+  @media (max-width:900px){
+    .sl-head,.sl-row{grid-template-columns:1fr 80px 110px;}
+    .sl-head .h-v,.sl-head .h-d,.sl-head .h-x,.sl-row .c-v,.sl-row .c-d,.sl-row .c-x{display:none;}
+  }
+</style>
+
+<div class="page-head">
+  <h1 style="margin-bottom:2px;">Shared Links</h1>
+  <div class="sub">Public links you've created · {{ page.paginator.count }} total</div>
+</div>
+
+<div style="margin-top:18px;" data-filelist data-view="list" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">
+  {% if links %}
+  <div class="flist">
+    <div class="sl-head">
+      <span>Link</span>
+      <span>Files</span>
+      <span class="h-v">Views</span>
+      <span class="h-d">Downloads</span>
+      <span class="h-x">Expires</span>
+      <span>Status</span>
+      <span style="text-align:right;">Actions</span>
+    </div>
+    {% for link in links %}
+    <div class="sl-row">
+      <div style="min-width:0;">
+        <a class="sl-nm" href="{% url 'files:share_link_detail' token=link.token %}">{{ link.name }}</a>
+        <div class="sl-sub">/s/{{ link.token|slice:":16" }}…</div>
+      </div>
+      <div class="sl-num">{{ link.n_files }}</div>
+      <div class="sl-num c-v">{{ link.view_count }}</div>
+      <div class="sl-num c-d">{{ link.download_count }}{% if link.download_limit %}/{{ link.download_limit }}{% endif %}</div>
+      <div class="sl-num c-x">{% if link.expires_at %}{{ link.expires_at|date:"M j, Y" }}{% else %}Never{% endif %}</div>
+      <div>
+        {% if not link.is_active %}<span class="sl-badge off">● Disabled</span>
+        {% elif link.is_expired %}<span class="sl-badge exp">● Expired</span>
+        {% else %}<span class="sl-badge live">● Active</span>{% endif %}
+      </div>
+      <div class="sl-acts">
+        <button type="button" class="iaction js-copy" data-url="{{ link.abs_url }}" title="Copy link">
+          <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+        <a class="iaction" href="{% url 'files:share_link_detail' token=link.token %}" title="Manage">
+          <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></a>
+        <form method="post" action="{% url 'files:share_link_toggle' token=link.token %}" style="display:inline;">
+          {% csrf_token %}<input type="hidden" name="next" value="{% url 'files:share_links' %}">
+          <button type="submit" class="iaction" title="{% if link.is_active %}Disable{% else %}Enable{% endif %}">
+            {% if link.is_active %}<svg viewBox="0 0 24 24"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+            {% else %}<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>{% endif %}</button>
+        </form>
+        <button type="button" class="iaction danger js-del-link" data-url="{% url 'files:share_link_delete' token=link.token %}" data-name="{{ link.name }}" title="Delete">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg></button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% include "files/_pager.html" %}
+  {% else %}
+  <div class="fempty">
+    <div class="big">🔗</div>
+    <p>You haven't created any share links yet. Create one from a file's page or by selecting files in My Files.</p>
+  </div>
+  {% endif %}
+</div>
+
+<form id="slDelForm" method="post" style="display:none;">{% csrf_token %}</form>
+
+<script>
+(function(){
+  var CHECK='<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+  document.querySelectorAll('.js-copy').forEach(function(b){
+    b.addEventListener('click', function(){
+      if(b.dataset.copied) return;
+      navigator.clipboard.writeText(b.dataset.url).then(function(){
+        var icon=b.innerHTML, title=b.title;
+        b.dataset.copied='1'; b.innerHTML=CHECK; b.title='Copied'; b.classList.add('copied');
+        setTimeout(function(){ b.innerHTML=icon; b.title=title; b.classList.remove('copied'); delete b.dataset.copied; }, 1200);
+      });
+    });
+  });
+  document.querySelectorAll('.js-del-link').forEach(function(b){
+    b.addEventListener('click', function(){
+      confirmAction({title:'Delete link?',
+        message:'Delete "'+b.dataset.name+'"? The link will stop working immediately. Files are not deleted.',
+        confirmLabel:'Delete', danger:true,
+        onConfirm:function(){ var f=document.getElementById('slDelForm'); f.action=b.dataset.url; f.submit(); }});
+    });
+  });
+})();
+</script>
+{% endblock %}

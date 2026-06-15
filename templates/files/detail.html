@@ -47,6 +47,11 @@
   .fd-mini:hover{background:#f5f6ff;}
   .fd-check{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0;}
   .fd-check input{width:auto;}
+  .fd-linkrow{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #f1f3f9;}
+  .fd-linkrow:first-of-type{border-top:1px solid #f1f3f9;}
+  .fd-linknm{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
+  .fd-linknm:hover{color:var(--accent2);}
+  .fd-linksub{color:var(--muted);font-size:12px;margin-top:2px;}
   .fd-back{display:inline-flex;align-items:center;gap:6px;color:var(--muted);margin-bottom:14px;font-size:13px;}
   @media (max-width:900px){ .fd-grid{grid-template-columns:1fr;} .fd-preview{position:static;} }
 
@@ -216,78 +221,26 @@
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Add people or groups
       </button>
 
-      <h3 style="margin-top:22px;">Public link</h3>
-      {% if file.is_public and file.public_token %}
-        {% url 'public:landing' token=file.public_token as public_url %}
-        <div class="fd-urlrow">
-          <input type="text" id="fdPublicUrl" readonly value="{{ request.scheme }}://{{ request.get_host }}{{ public_url }}">
-          <button type="button" class="fd-mini" id="fdCopy">Copy</button>
-          <a class="fd-mini" href="{{ public_url }}" target="_blank" rel="noopener">Open</a>
-        </div>
-      {% else %}
-        <p class="hint" style="margin:0 0 8px;">Create a public link anyone can use — no account needed.</p>
-      {% endif %}
-
-      <form method="post" action="{% url 'files:manage_public_link' uuid=file.uuid %}" id="lnkForm" style="margin-top:14px;">
-        {% csrf_token %}
-        <input type="hidden" name="access" id="lnkAccess" value="{% if file.is_public %}public{% else %}restricted{% endif %}">
-        <input type="hidden" name="clear_password" id="lnkClearPwd" value="">
-
-        <div class="lnk-list">
-          <div class="lnk-row">
-            <div class="lnk-main"><div class="lnk-t">Public link</div>
-              <div class="lnk-s">Anyone with the link can open this — no account needed.</div></div>
-            <label class="switch"><input type="checkbox" id="lnkPublic" {% if file.is_public %}checked{% endif %}><span class="slider"></span></label>
+      <h3 style="margin-top:22px;">Public links</h3>
+      {% for link in file_links %}
+      <div class="fd-linkrow">
+        <div style="min-width:0;flex:1;">
+          <a class="fd-linknm" href="{% url 'files:share_link_detail' token=link.token %}">{{ link.name }}</a>
+          <div class="fd-linksub">
+            {% if not link.is_active %}Disabled{% elif link.is_expired %}Expired{% else %}Active{% endif %}
+            · {{ link.view_count }} view{{ link.view_count|pluralize }} · {{ link.download_count }} download{{ link.download_count|pluralize }}
+            {% if link.require_email_verify %} · tracked{% endif %}{% if link.has_password %} · 🔒{% endif %}{% if not link.allow_download %} · 👁{% endif %}
           </div>
         </div>
-
-        <div id="lnkOpts" {% if not file.is_public %}hidden{% endif %}>
-          <div class="lnk-list">
-            <div class="lnk-row">
-              <div class="lnk-main"><div class="lnk-t">Require email verification</div>
-                <div class="lnk-s">Visitors confirm their email before opening (tracked access).</div></div>
-              <label class="switch"><input type="checkbox" name="require_verify" {% if file.public_access_label == 'tracked' %}checked{% endif %}><span class="slider"></span></label>
-            </div>
-            <div class="lnk-row">
-              <div class="lnk-main"><div class="lnk-t">Preview only</div>
-                <div class="lnk-s">Allow viewing in the browser but block downloads.</div></div>
-              <label class="switch"><input type="checkbox" name="preview_only" {% if not file.public_allow_download %}checked{% endif %}><span class="slider"></span></label>
-            </div>
-            <div class="lnk-row">
-              <div class="lnk-main"><div class="lnk-t">Require password</div>
-                <div class="lnk-s">{% if file.has_public_password %}A password is set — toggle off to remove it.{% else %}Visitors must enter a password to open.{% endif %}</div></div>
-              <label class="switch"><input type="checkbox" id="lnkPwdToggle" data-toggle="fdpwd" {% if file.has_public_password %}checked{% endif %}><span class="slider"></span></label>
-            </div>
-            <div class="lnk-reveal" data-reveal="fdpwd" {% if not file.has_public_password %}hidden{% endif %}>
-              <input type="password" name="password" autocomplete="new-password" placeholder="{% if file.has_public_password %}Enter a new password to change it{% else %}Set a password{% endif %}">
-            </div>
-            <div class="lnk-row">
-              <div class="lnk-main"><div class="lnk-t">Set expiration</div>
-                <div class="lnk-s">Automatically disable the link on a date.</div></div>
-              <label class="switch"><input type="checkbox" id="lnkExpToggle" data-toggle="fdexp" {% if file.expiry_date %}checked{% endif %}><span class="slider"></span></label>
-            </div>
-            <div class="lnk-reveal" data-reveal="fdexp" {% if not file.expiry_date %}hidden{% endif %}>
-              <input type="date" name="expiry_date" value="{{ file.expiry_date|date:'Y-m-d' }}">
-            </div>
-            <div class="lnk-row">
-              <div class="lnk-main"><div class="lnk-t">Limit downloads</div>
-                <div class="lnk-s">Disable the link after a set number of downloads.</div></div>
-              <label class="switch"><input type="checkbox" id="lnkLimitToggle" data-toggle="fdlimit" {% if file.download_limit %}checked{% endif %}><span class="slider"></span></label>
-            </div>
-            <div class="lnk-reveal" data-reveal="fdlimit" {% if not file.download_limit %}hidden{% endif %}>
-              <input type="number" name="download_limit" min="1" placeholder="e.g. 5" value="{{ file.download_limit|default_if_none:'' }}">
-            </div>
-          </div>
-        </div>
-
-        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-          <button type="submit" name="action" value="save" class="fd-btn primary" style="width:auto;">{% if file.is_public and file.public_token %}Save link settings{% else %}Create public link{% endif %}</button>
-          {% if file.is_public and file.public_token %}
-          <button type="submit" name="action" value="rotate" class="lnk-mini">↻ Rotate link</button>
-          <button type="submit" name="action" value="disable" class="lnk-mini danger">Disable</button>
-          {% endif %}
-        </div>
-      </form>
+        <button type="button" class="fd-mini js-copy-link" data-url="{{ link.abs_url }}">Copy</button>
+        <a class="fd-mini" href="{% url 'files:share_link_detail' token=link.token %}">Manage</a>
+      </div>
+      {% empty %}
+      <p class="hint" style="margin:0 0 12px;">No public links yet. Create one anyone can use — no account needed.</p>
+      {% endfor %}
+      <button type="button" class="fd-btn secondary" id="openCreateLink" style="margin-top:10px;">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Create public link
+      </button>
     </div></div>
     {% endif %}
   </div>
@@ -320,42 +273,99 @@
 </div>
 {{ share_users|json_script:"sh-users" }}
 {{ share_groups|json_script:"sh-groups" }}
+
+{# ---------------- Create-link modal ---------------- #}
+<div id="createLinkModal" class="cmodal" hidden>
+  <div class="cmodal-card" style="max-width:480px;">
+    <button type="button" class="cmodal-x" data-cl-close aria-label="Close">&times;</button>
+    <h2 style="margin-top:0;">Create public link</h2>
+    <div class="sub" style="color:var(--muted);">Anyone with the link can open “{{ file.display_name }}” — no account needed.</div>
+
+    <label style="margin-top:14px;">Link name <span class="hint">(optional)</span></label>
+    <input type="text" id="clName" maxlength="120" placeholder="e.g. Client review link">
+
+    <div class="lnk-card" style="margin-top:12px;">
+      <div class="lnk-list">
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Require email verification</div>
+            <div class="lnk-s">Visitors confirm their email before opening (tracked).</div></div>
+          <label class="switch"><input type="checkbox" id="clVerify"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Preview only</div>
+            <div class="lnk-s">Allow viewing in the browser but block downloads.</div></div>
+          <label class="switch"><input type="checkbox" id="clPreview"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Require password</div>
+            <div class="lnk-s">Visitors must enter a password to open the link.</div></div>
+          <label class="switch"><input type="checkbox" id="clPwdToggle" data-toggle="clpwd"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="clpwd" hidden>
+          <input type="password" id="clPwd" autocomplete="new-password" placeholder="Set a password">
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Set expiration</div>
+            <div class="lnk-s">Automatically disable the link on a date.</div></div>
+          <label class="switch"><input type="checkbox" id="clExpToggle" data-toggle="clexp"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="clexp" hidden>
+          <input type="date" id="clExp">
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Limit downloads</div>
+            <div class="lnk-s">Disable the link after this many downloads (total).</div></div>
+          <label class="switch"><input type="checkbox" id="clLimitToggle" data-toggle="cllimit"><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="cllimit" hidden>
+          <input type="number" id="clLimit" min="1" placeholder="e.g. 25">
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button type="button" class="btn btn-ghost btn-sm" data-cl-close>Cancel</button>
+      <button type="button" class="btn btn-sm" id="clSubmit">Create link</button>
+    </div>
+  </div>
+</div>
 {% endif %}
 
 <script>
 (function(){
-  var btn=document.getElementById('fdCopy');
-  if(btn) btn.addEventListener('click',function(){
-    var i=document.getElementById('fdPublicUrl'); i.select();
-    navigator.clipboard.writeText(i.value).then(function(){
-      var t=btn.textContent; btn.textContent='Copied ✓';
-      setTimeout(function(){btn.textContent=t;},1500);
-    }).catch(function(){ document.execCommand('copy'); });
+  // Copy a link row's URL.
+  document.querySelectorAll('.js-copy-link').forEach(function(b){
+    b.addEventListener('click', function(){
+      navigator.clipboard.writeText(b.dataset.url).then(function(){
+        var t=b.textContent; b.textContent='Copied ✓'; setTimeout(function(){b.textContent=t;},1200); });
+    });
   });
 
-  // ---- public-link manage form: master toggle + submit cleanup ----
-  var lnkForm = document.getElementById('lnkForm');
-  if(lnkForm){
-    var lnkPublic = document.getElementById('lnkPublic');
-    var lnkOpts = document.getElementById('lnkOpts');
-    var lnkAccess = document.getElementById('lnkAccess');
-    lnkPublic.addEventListener('change', function(){
-      lnkOpts.hidden = !lnkPublic.checked;
-      lnkAccess.value = lnkPublic.checked ? 'public' : 'restricted';
+  // ---- create-link modal (mints a new ShareLink for this file) ----
+  (function(){
+    var open=document.getElementById('openCreateLink'), modal=document.getElementById('createLinkModal');
+    if(!open || !modal) return;
+    var close=function(){ modal.hidden=true; };
+    open.addEventListener('click', function(){ modal.hidden=false; });
+    modal.querySelector('[data-cl-close]').addEventListener('click', close);
+    modal.addEventListener('click', function(e){ if(e.target===modal) close(); });
+    var pwdT=document.getElementById('clPwdToggle'), expT=document.getElementById('clExpToggle'), limT=document.getElementById('clLimitToggle');
+    document.getElementById('clSubmit').addEventListener('click', function(){
+      var btn=this; btn.disabled=true; btn.textContent='Creating…';
+      var payload={ file_uuids:["{{ file.uuid }}"],
+        name:document.getElementById('clName').value,
+        require_verify:document.getElementById('clVerify').checked,
+        preview_only:document.getElementById('clPreview').checked,
+        password:(pwdT.checked?(document.getElementById('clPwd').value||null):null),
+        expiry_date:(expT.checked?(document.getElementById('clExp').value||null):null),
+        download_limit:(limT.checked?(document.getElementById('clLimit').value||null):null) };
+      fetch("{% url 'files:share_link_create' %}",{method:'POST',
+        headers:{'X-CSRFToken':'{{ csrf_token }}','Content-Type':'application/json'},
+        body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){
+        if(d.ok){ window.location.reload(); }
+        else { alert(d.error||'Could not create link.'); btn.disabled=false; btn.textContent='Create link'; }
+      }).catch(function(){ alert('Request failed.'); btn.disabled=false; btn.textContent='Create link'; });
     });
-    lnkForm.addEventListener('submit', function(){
-      // Off = remove any existing password; on with a value = change it.
-      var pwdOn = (document.getElementById('lnkPwdToggle')||{}).checked;
-      document.getElementById('lnkClearPwd').value = pwdOn ? '' : 'on';
-      // Clear the revealed value when a toggle is off so the setting is removed.
-      if(!(document.getElementById('lnkExpToggle')||{}).checked){
-        var ed = lnkForm.querySelector('[name="expiry_date"]'); if(ed) ed.value='';
-      }
-      if(!(document.getElementById('lnkLimitToggle')||{}).checked){
-        var dl = lnkForm.querySelector('[name="download_limit"]'); if(dl) dl.value='';
-      }
-    });
-  }
+  })();
 
   var modal = document.getElementById('shareModal');
   if(!modal) return;

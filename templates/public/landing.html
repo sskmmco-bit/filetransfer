@@ -36,7 +36,7 @@
   <div class="pb-card">
     <div class="pb-head">
       <h1>{% if files|length == 1 %}{{ rep.display_name }}{% else %}{{ files|length }} files shared with you{% endif %}</h1>
-      <div class="sub">{{ files|length }} file{{ files|length|pluralize }} · {{ total_size|filesizeformat }}{% if rep.expiry_date %} · expires {{ rep.expiry_date|date:"M j, Y" }}{% endif %}</div>
+      <div class="sub">{{ files|length }} file{{ files|length|pluralize }} · {{ total_size|filesizeformat }}{% if link.expires_at %} · expires {{ link.expires_at|date:"M j, Y" }}{% endif %}</div>
     </div>
 
     {% if ready %}

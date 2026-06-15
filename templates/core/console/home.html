@@ -39,6 +39,12 @@
   .acard .ic svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
   .acard .nm{font-weight:600;font-size:14px;}
   .acard .ds{color:var(--muted);font-size:12px;margin-top:1px;}
+  @media (max-width:768px){
+    .sw-legend{grid-template-columns:1fr;gap:10px;}
+    .sw-cons{flex-wrap:wrap;gap:10px;}
+    .sw-cons .right{margin-left:0;width:100%;min-width:0;padding-left:54px;text-align:left;}
+    .acards{grid-template-columns:1fr;}
+  }
 </style>
 
 <!-- Stat cards -->
@@ -62,7 +68,7 @@
 </div>
 
 <!-- Storage row -->
-<div class="cols" style="grid-template-columns:1fr 1fr;margin-bottom:20px;">
+<div class="cols-2" style="margin-bottom:20px;">
   <div class="sw-card">
     <div class="sw-h">Storage breakdown</div>
     <div class="sw-sub">{{ storage.total_human }} across all active files</div>

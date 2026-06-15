@@ -29,6 +29,11 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-insecure-change-me")
 DEBUG = env("DJANGO_DEBUG")
 ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS")
 
+# Public base URL for share links (e.g. "https://files.company.com"). We store
+# only a link's token and build "<PUBLIC_BASE_URL>/s/<token>" on demand — when
+# empty we fall back to the current request host (§5.4).
+PUBLIC_BASE_URL = env("PUBLIC_BASE_URL", default="")
+
 # Secret used to Fernet-encrypt SMTP / LDAP secrets at rest (§5.11). Generate with:
 #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 SECRETS_ENCRYPTION_KEY = env("SECRETS_ENCRYPTION_KEY", default="")

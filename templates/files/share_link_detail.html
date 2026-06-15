@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% load file_extras %}
+{% block title %}{{ link.name }} — Shared Link{% endblock %}
+{% block content %}
+
+<style>
+  .sld-grid{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;}
+  .sld-card{background:#fff;border:1px solid var(--line);border-radius:18px;
+    box-shadow:0 1px 3px rgba(16,24,40,.05),0 12px 24px rgba(16,24,40,.05);}
+  .sld-card .pad{padding:20px 22px;}
+  .sld-card h3{margin:0 0 14px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+  .sld-stat{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .sld-stat .box{border:1px solid var(--line);border-radius:12px;padding:13px 14px;background:#fafbff;}
+  .sld-stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);}
+  .sld-stat .v{font-size:22px;font-weight:700;margin-top:2px;}
+  .sld-frow{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid #f1f3f9;}
+  .sld-frow:first-of-type{border-top:0;}
+  .sld-frow .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
+  .sld-frow .sz{color:var(--muted);font-size:12px;}
+  /* file preview thumbnail (image cover, else a coloured type chip) */
+  .sld-thumb{position:relative;width:52px;height:52px;border-radius:10px;flex:none;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;background:#f4f7f0;}
+  .sld-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .sld-thumb .ext{font-size:10px;font-weight:700;letter-spacing:.02em;}
+  .sld-thumb.doc{background:#fdecec;color:#e0564a;} .sld-thumb.img{background:#e7f7f0;color:#0f9d6b;}
+  .sld-thumb.vid{background:#eef0ff;color:#4f46e5;} .sld-thumb.zip{background:#fef3e2;color:#d98a09;}
+  .sld-thumb.code{background:#e8f0fe;color:#2563eb;} .sld-thumb.file{background:#eef1f7;color:#64748b;}
+  .sld-fact{display:flex;gap:6px;flex:none;}
+  /* activity timeline */
+  .sld-act{display:flex;gap:12px;padding:11px 0;border-top:1px solid #f1f3f9;}
+  .sld-act:first-of-type{border-top:0;}
+  .sld-act .dot{width:10px;height:10px;border-radius:50%;flex:none;margin-top:5px;}
+  .sld-act .dot.view{background:#4f46e5;} .sld-act .dot.download{background:#0f9d6b;}
+  .sld-act .t{font-size:14px;color:var(--ink);}
+  .sld-act .when{color:var(--muted);font-size:12px;margin-top:1px;}
+  .sld-badge{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:5px 12px;border-radius:999px;}
+  .sld-badge.live{background:var(--green-bg);color:#0f7a52;}
+  .sld-badge.off{background:#eef1f7;color:#64748b;}
+  .sld-badge.exp{background:var(--amber-bg);color:#b4730a;}
+  @media (max-width:900px){ .sld-grid{grid-template-columns:1fr;} }
+</style>
+
+<a class="fd-back" href="{% url 'files:share_links' %}" style="display:inline-flex;gap:6px;color:var(--muted);margin-bottom:14px;font-size:13px;">← Back to Shared Links</a>
+
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap;">
+  <h1 style="margin:0;font-size:22px;">{{ link.name }}</h1>
+  {% if not link.is_active %}<span class="sld-badge off">● Disabled</span>
+  {% elif link.is_expired %}<span class="sld-badge exp">● Expired</span>
+  {% else %}<span class="sld-badge live">● Active</span>{% endif %}
+</div>
+
+<div class="sld-grid">
+  <!-- LEFT: files + URL + stats -->
+  <div style="display:flex;flex-direction:column;gap:20px;">
+    <div class="sld-card"><div class="pad">
+      <h3>Public URL</h3>
+      <div class="lnk-urlrow">
+        <input type="text" id="sldUrl" readonly value="{{ public_url }}">
+        <button type="button" class="lnk-mini" id="sldCopy">Copy</button>
+        <a class="lnk-mini" href="{{ public_url }}" target="_blank" rel="noopener">Open</a>
+      </div>
+    </div></div>
+
+    <div class="sld-card"><div class="pad">
+      <h3>Files in this link ({{ files|length }})</h3>
+      {% for f in files %}
+      <div class="sld-frow">
+        {% if f|previewable %}
+        <a class="sld-thumb {{ f.original_filename|ftype }}" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" rel="noopener" title="Preview">
+          {% if f.original_filename|ftype == 'img' %}<img src="{% url 'files:thumb' uuid=f.uuid %}" loading="lazy" alt="" onerror="this.remove()">{% endif %}
+          <span class="ext">{{ f.original_filename|fext }}</span>
+        </a>
+        {% else %}
+        <div class="sld-thumb {{ f.original_filename|ftype }}"><span class="ext">{{ f.original_filename|fext }}</span></div>
+        {% endif %}
+        <div style="min-width:0;flex:1;">
+          <a class="nm" href="{% url 'files:detail' uuid=f.uuid %}">{{ f.display_name }}</a>
+          <div class="sz">{{ f.original_filename|fext }} · {{ f.size|filesizeformat }}</div>
+        </div>
+        <div class="sld-fact">
+          {% if f|previewable %}<a class="lnk-mini" href="{% url 'files:preview' uuid=f.uuid %}" target="_blank" rel="noopener">Preview</a>{% endif %}
+          <a class="lnk-mini" href="{% url 'files:download' uuid=f.uuid %}">Download</a>
+        </div>
+      </div>
+      {% empty %}
+      <p class="hint" style="margin:0;">No active files remain in this link.</p>
+      {% endfor %}
+    </div></div>
+
+    <div class="sld-card"><div class="pad">
+      <h3>Statistics</h3>
+      <div class="sld-stat">
+        <div class="box"><div class="k">Views</div><div class="v">{{ link.view_count }}</div></div>
+        <div class="box"><div class="k">Downloads</div><div class="v">{{ link.download_count }}{% if link.download_limit %} <span style="font-size:14px;color:var(--muted);">/ {{ link.download_limit }}</span>{% endif %}</div></div>
+        <div class="box"><div class="k">Created</div><div class="v" style="font-size:15px;">{{ link.created_at|date:"M j, Y" }}</div></div>
+        <div class="box"><div class="k">Expires</div><div class="v" style="font-size:15px;">{% if link.expires_at %}{{ link.expires_at|date:"M j, Y" }}{% else %}Never{% endif %}</div></div>
+      </div>
+    </div></div>
+
+    <div class="sld-card"><div class="pad">
+      <h3>Activity</h3>
+      {% for a in activity %}
+      <div class="sld-act">
+        <span class="dot {{ a.kind }}"></span>
+        <div style="min-width:0;flex:1;">
+          <div class="t"><b>{{ a.who }}</b> {% if a.kind == 'view' %}viewed{% else %}downloaded{% endif %}{% if a.file %} · {{ a.file }}{% endif %}</div>
+          <div class="when">{{ a.when|date:"j M Y, H:i" }}</div>
+        </div>
+      </div>
+      {% empty %}
+      <p class="hint" style="margin:0;">No activity yet. Views and downloads will show up here — including the visitor's email on tracked links.</p>
+      {% endfor %}
+    </div></div>
+  </div>
+
+  <!-- RIGHT: security settings + actions -->
+  <div class="sld-card"><div class="pad">
+    <h3>Link settings</h3>
+    <form method="post" action="{% url 'files:share_link_update' token=link.token %}" id="sldForm">
+      {% csrf_token %}
+      <input type="hidden" name="clear_password" id="sldClearPwd" value="">
+      <label>Link name</label>
+      <input type="text" name="name" value="{{ link.name }}" maxlength="120">
+
+      <div class="lnk-list" style="margin-top:8px;">
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Require email verification</div>
+            <div class="lnk-s">Visitors confirm their email before opening (tracked).</div></div>
+          <label class="switch"><input type="checkbox" name="require_verify" {% if link.require_email_verify %}checked{% endif %}><span class="slider"></span></label>
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Preview only</div>
+            <div class="lnk-s">Allow viewing in the browser but block downloads.</div></div>
+          <label class="switch"><input type="checkbox" name="preview_only" {% if not link.allow_download %}checked{% endif %}><span class="slider"></span></label>
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Require password</div>
+            <div class="lnk-s">{% if link.has_password %}A password is set — toggle off to remove it.{% else %}Visitors must enter a password to open.{% endif %}</div></div>
+          <label class="switch"><input type="checkbox" id="sldPwdToggle" data-toggle="sldpwd" {% if link.has_password %}checked{% endif %}><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="sldpwd" {% if not link.has_password %}hidden{% endif %}>
+          <input type="password" name="password" autocomplete="new-password" placeholder="{% if link.has_password %}Enter a new password to change it{% else %}Set a password{% endif %}">
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Set expiration</div>
+            <div class="lnk-s">Automatically disable the link on a date.</div></div>
+          <label class="switch"><input type="checkbox" id="sldExpToggle" data-toggle="sldexp" {% if link.expires_at %}checked{% endif %}><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="sldexp" {% if not link.expires_at %}hidden{% endif %}>
+          <input type="date" name="expiry_date" value="{{ link.expires_at|date:'Y-m-d' }}">
+        </div>
+        <div class="lnk-row">
+          <div class="lnk-main"><div class="lnk-t">Limit downloads</div>
+            <div class="lnk-s">Disable the link after this many downloads (total).</div></div>
+          <label class="switch"><input type="checkbox" id="sldLimitToggle" data-toggle="sldlimit" {% if link.download_limit %}checked{% endif %}><span class="slider"></span></label>
+        </div>
+        <div class="lnk-reveal" data-reveal="sldlimit" {% if not link.download_limit %}hidden{% endif %}>
+          <input type="number" name="download_limit" min="1" placeholder="e.g. 25" value="{{ link.download_limit|default_if_none:'' }}">
+        </div>
+      </div>
+      <button type="submit" class="fd-btn primary" style="width:100%;margin-top:14px;">Save link settings</button>
+    </form>
+
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+      <form method="post" action="{% url 'files:share_link_rotate' token=link.token %}">{% csrf_token %}
+        <button type="submit" class="lnk-mini">↻ Rotate token</button></form>
+      <form method="post" action="{% url 'files:share_link_toggle' token=link.token %}">{% csrf_token %}
+        <button type="submit" class="lnk-mini">{% if link.is_active %}Disable{% else %}Enable{% endif %}</button></form>
+      <form method="post" action="{% url 'files:share_link_delete' token=link.token %}" id="sldDelForm">{% csrf_token %}
+        <button type="button" class="lnk-mini danger"
+          onclick="confirmAction({title:'Delete link?',message:'Delete “{{ link.name|escapejs }}”? It stops working immediately. Files are not deleted.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('sldDelForm').submit();}})">Delete</button></form>
+    </div>
+  </div></div>
+</div>
+
+<script>
+(function(){
+  var copy=document.getElementById('sldCopy');
+  if(copy) copy.addEventListener('click',function(){
+    var i=document.getElementById('sldUrl'); i.select();
+    navigator.clipboard.writeText(i.value).then(function(){ var t=copy.textContent; copy.textContent='Copied ✓'; setTimeout(function(){copy.textContent=t;},1500); });
+  });
+  var form=document.getElementById('sldForm');
+  if(form) form.addEventListener('submit',function(){
+    var pwdOn=(document.getElementById('sldPwdToggle')||{}).checked;
+    document.getElementById('sldClearPwd').value = pwdOn ? '' : 'on';
+    if(!(document.getElementById('sldExpToggle')||{}).checked){ var ed=form.querySelector('[name="expiry_date"]'); if(ed) ed.value=''; }
+    if(!(document.getElementById('sldLimitToggle')||{}).checked){ var dl=form.querySelector('[name="download_limit"]'); if(dl) dl.value=''; }
+  });
+})();
+</script>
+{% endblock %}

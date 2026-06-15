@@ -28,8 +28,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from apps.core.utils import get_client_ip
-from apps.files import services, storage
-from apps.files.models import FileStatus, StoredFile
+from apps.files import sharelinks, storage
+from apps.files.models import FileStatus, ShareLink, StoredFile
 from apps.notifications.email import send_public_verification_code
 
 from .forms import CodeForm, EmailForm, PasswordForm
@@ -40,28 +40,26 @@ CODE_EXPIRY_MINUTES = 15
 MAX_CODE_ATTEMPTS = 5
 
 
-def _bundle(token: str):
-    """All active, public files sharing this token (the transfer bundle)."""
-    qs = StoredFile.objects.filter(
-        public_token=token, is_public=True, status=FileStatus.ACTIVE
-    ).order_by("created_at")
+def _link(token: str) -> ShareLink:
+    """The live share link for this token (404 if missing/disabled/expired)."""
+    link = ShareLink.objects.filter(token=token, is_active=True).first()
+    if link is None or not link.is_live:
+        raise Http404("This link is invalid or has expired.")
+    return link
+
+
+def _link_files(link: ShareLink):
+    """Active files covered by the link, oldest first."""
+    qs = link.files.filter(status=FileStatus.ACTIVE).order_by("created_at")
     if not qs.exists():
         raise Http404("This link is invalid or has expired.")
     return qs
 
 
-def _bundle_file(token: str, uuid):
+def _link_file(link: ShareLink, uuid):
     return get_object_or_404(
-        StoredFile, uuid=uuid, public_token=token, is_public=True, status=FileStatus.ACTIVE
+        StoredFile, uuid=uuid, share_links=link, status=FileStatus.ACTIVE
     )
-
-
-def _needs_verify(files) -> bool:
-    return any(f.public_require_email_verify for f in files)
-
-
-def _needs_password(files) -> bool:
-    return any(f.public_password_hash for f in files)
 
 
 def _grant_key(token: str) -> str:
@@ -89,20 +87,21 @@ def _has_pw_grant(request, token: str) -> bool:
     return _grant_ok(request, _pw_key(token), token)
 
 
-def _gate(request, token, files):
+def _gate(request, link, token):
     """Redirect to the landing gate if a required password/verify isn't met."""
-    if _needs_password(files) and not _has_pw_grant(request, token):
+    if link.has_password and not _has_pw_grant(request, token):
         return redirect("public:landing", token=token)
-    if _needs_verify(files) and not _has_valid_grant(request, token):
+    if link.require_email_verify and not _has_valid_grant(request, token):
         return redirect("public:landing", token=token)
     return None
 
 
-def _landing_ctx(request, token, files, **extra):
+def _landing_ctx(request, link, files, **extra):
+    files = list(files)
     ctx = {
-        "files": files, "token": token, "rep": files[0],
+        "files": files, "token": link.token, "link": link, "rep": files[0],
         "total_size": sum(f.size for f in files),
-        "allow_download": files[0].public_allow_download,
+        "allow_download": link.allow_download,
     }
     ctx.update(extra)
     return ctx
@@ -111,16 +110,18 @@ def _landing_ctx(request, token, files, **extra):
 # ---------------------------------------------------------------------------
 @require_http_methods(["GET"])
 def landing(request, token):
-    files = list(_bundle(token))
-    need_pw = _needs_password(files) and not _has_pw_grant(request, token)
-    need_verify = _needs_verify(files) and not _has_valid_grant(request, token)
+    link = _link(token)
+    files = list(_link_files(link))
+    sharelinks.record_view(link, request)
+    need_pw = link.has_password and not _has_pw_grant(request, token)
+    need_verify = link.require_email_verify and not _has_valid_grant(request, token)
     ready = not need_pw and not need_verify
     extra = {"ready": ready}
     if need_pw:
         extra["gate"] = "password"; extra["password_form"] = PasswordForm()
     elif need_verify:
         extra["gate"] = "verify"; extra["email_form"] = EmailForm()
-    return render(request, "public/landing.html", _landing_ctx(request, token, files, **extra))
+    return render(request, "public/landing.html", _landing_ctx(request, link, files, **extra))
 
 
 @require_http_methods(["POST"])
@@ -128,14 +129,14 @@ def submit_password(request, token):
     from django.contrib.auth.hashers import check_password
     from django.utils import timezone
 
-    files = list(_bundle(token))
-    rep = files[0]
+    link = _link(token)
+    files = list(_link_files(link))
     form = PasswordForm(request.POST)
-    ok = (form.is_valid() and rep.public_password_hash
-          and check_password(form.cleaned_data["password"], rep.public_password_hash))
+    ok = (form.is_valid() and link.has_password
+          and check_password(form.cleaned_data["password"], link.password_hash))
     if not ok:
         return render(request, "public/landing.html", _landing_ctx(
-            request, token, files, ready=False, gate="password",
+            request, link, files, ready=False, gate="password",
             password_form=form, error="Incorrect password."))
     request.session[_pw_key(token)] = {
         "token": token, "expires": timezone.now().timestamp() + GRANT_TTL_SECONDS,
@@ -145,29 +146,29 @@ def submit_password(request, token):
 
 @require_http_methods(["POST"])
 def request_code(request, token):
-    files = list(_bundle(token))
-    rep = files[0]
+    link = _link(token)
+    files = list(_link_files(link))
     # Password gate (if any) must be cleared before email verification.
-    if _needs_password(files) and not _has_pw_grant(request, token):
+    if link.has_password and not _has_pw_grant(request, token):
         return redirect("public:landing", token=token)
     form = EmailForm(request.POST)
     if not form.is_valid():
         return render(request, "public/landing.html", _landing_ctx(
-            request, token, files, ready=False, gate="verify", email_form=form))
+            request, link, files, ready=False, gate="verify", email_form=form))
 
     email = form.cleaned_data["email"]
     code = f"{secrets.randbelow(1_000_000):06d}"
-    # The challenge is bound to the bundle via a representative file + the token.
-    PublicDownloadVerification.objects.filter(stored_file=rep, email=email).delete()
+    # The challenge is bound to the link + token snapshot (rotate invalidates it).
+    PublicDownloadVerification.objects.filter(share_link=link, email=email).delete()
     from django.utils import timezone
     PublicDownloadVerification.objects.create(
-        stored_file=rep,
+        share_link=link,
         email=email,
         code_hash=PublicDownloadVerification.hash_code(code),
         token_snapshot=token,
         expires_at=timezone.now() + timezone.timedelta(minutes=CODE_EXPIRY_MINUTES),
     )
-    label = rep.display_name if len(files) == 1 else f"{len(files)} files"
+    label = files[0].display_name if len(files) == 1 else f"{len(files)} files"
     send_public_verification_code(email, label, code)
     return render(request, "public/verify.html",
                   {"token": token, "email": email, "code_form": CodeForm()})
@@ -177,12 +178,11 @@ def request_code(request, token):
 def verify_code(request, token):
     from django.utils import timezone
 
-    files = list(_bundle(token))
-    rep = files[0]
+    link = _link(token)
     email = request.POST.get("email", "")
     form = CodeForm(request.POST)
     challenge = (
-        PublicDownloadVerification.objects.filter(stored_file=rep, email=email)
+        PublicDownloadVerification.objects.filter(share_link=link, email=email)
         .order_by("-created_at")
         .first()
     )
@@ -212,15 +212,15 @@ def verify_code(request, token):
 
 @require_http_methods(["GET"])
 def preview(request, token, uuid):
-    """Inline preview of a bundle file (no download slot consumed).
+    """Inline preview of a link file (no download slot consumed).
 
     Allowed even for preview-only links — previewing is the point.
     """
-    files = list(_bundle(token))
-    gate = _gate(request, token, files)
+    link = _link(token)
+    gate = _gate(request, link, token)
     if gate:
         return gate
-    sf = _bundle_file(token, uuid)
+    sf = _link_file(link, uuid)
     return redirect(storage.presigned_get_url(
         sf.storage_key, download_name=sf.original_filename,
         inline=True, content_type=sf.content_type))
@@ -228,43 +228,44 @@ def preview(request, token, uuid):
 
 @require_http_methods(["GET"])
 def download(request, token, uuid):
-    """Download a single file from the bundle."""
-    files = list(_bundle(token))
-    gate = _gate(request, token, files)
+    """Download a single file via the link (counts toward the link's limit)."""
+    link = _link(token)
+    gate = _gate(request, link, token)
     if gate:
         return gate
-    if not files[0].public_allow_download:
+    if not link.allow_download:
         return render(request, "public/denied.html",
-                      {"file": files[0], "preview_only": True}, status=403)
-    sf = _bundle_file(token, uuid)
+                      {"link": link, "preview_only": True}, status=403)
+    sf = _link_file(link, uuid)
 
-    if services.reserve_download_slot(sf.pk) is None:
-        return render(request, "public/denied.html", {"file": sf}, status=403)
+    if not sharelinks.reserve_link_download(link):
+        return render(request, "public/denied.html", {"link": link}, status=403)
 
     grant = request.session.get(_grant_key(token)) or {}
     from apps.audit.models import DownloadEvent
     DownloadEvent.objects.create(
         stored_file=sf, user=None, visitor_email=grant.get("email", ""),
-        via_public_link=True, ip_address=get_client_ip(request),
+        via_public_link=True, share_link=link, ip_address=get_client_ip(request),
     )
     return redirect(storage.presigned_get_url(sf.storage_key, download_name=sf.original_filename))
 
 
 @require_http_methods(["GET"])
 def download_all(request, token):
-    """Stream every file in the bundle as a ZIP (reserves a slot per file)."""
+    """Stream every file in the link as a ZIP (each counts toward the limit)."""
     import zipfile
     from tempfile import SpooledTemporaryFile
 
     from django.http import FileResponse
 
-    files = list(_bundle(token))
-    gate = _gate(request, token, files)
+    link = _link(token)
+    files = list(_link_files(link))
+    gate = _gate(request, link, token)
     if gate:
         return gate
-    if not files[0].public_allow_download:
+    if not link.allow_download:
         return render(request, "public/denied.html",
-                      {"file": files[0], "preview_only": True}, status=403)
+                      {"link": link, "preview_only": True}, status=403)
 
     grant = request.session.get(_grant_key(token)) or {}
     from apps.audit.models import DownloadEvent
@@ -273,16 +274,16 @@ def download_all(request, token):
     added = 0
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
         for sf in files:
-            if services.reserve_download_slot(sf.pk) is None:
-                continue  # skip files whose limit is reached
+            if not sharelinks.reserve_link_download(link):
+                break  # link-level limit exhausted
             data = storage.get_object_body(sf.storage_key).read()
             zf.writestr(sf.original_filename, data)
             DownloadEvent.objects.create(
                 stored_file=sf, user=None, visitor_email=grant.get("email", ""),
-                via_public_link=True, ip_address=get_client_ip(request),
+                via_public_link=True, share_link=link, ip_address=get_client_ip(request),
             )
             added += 1
     if not added:
-        return render(request, "public/denied.html", {"file": files[0]}, status=403)
+        return render(request, "public/denied.html", {"link": link}, status=403)
     tmp.seek(0)
     return FileResponse(tmp, as_attachment=True, filename="files.zip", content_type="application/zip")

@@ -14,8 +14,9 @@ from django.utils import timezone
 
 
 class PublicDownloadVerification(models.Model):
-    stored_file = models.ForeignKey(
-        "files.StoredFile", on_delete=models.CASCADE, related_name="public_verifications"
+    share_link = models.ForeignKey(
+        "files.ShareLink", on_delete=models.CASCADE, related_name="verifications",
+        null=True, blank=True,
     )
     email = models.EmailField()
     code_hash = models.CharField(max_length=64)
@@ -27,10 +28,10 @@ class PublicDownloadVerification(models.Model):
 
     class Meta:
         db_table = "public_download_verification"
-        indexes = [models.Index(fields=["stored_file", "email"])]
+        indexes = [models.Index(fields=["share_link", "email"])]
 
     def __str__(self):
-        return f"verify {self.email} for {self.stored_file_id}"
+        return f"verify {self.email} for link {self.share_link_id}"
 
     @staticmethod
     def hash_code(code: str) -> str:

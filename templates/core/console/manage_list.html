@@ -5,19 +5,20 @@
   <div class="sub"><a href="{% url 'core:console_home' %}">&larr; Admin console</a></div></div>
 
 <div class="toolbar">
-  <form method="get" style="display:flex;gap:8px;">
+  <form method="get" class="toolbar-form">
     <input type="text" name="q" value="{{ q }}" placeholder="Search {{ resource.label|lower }}…">
     <button class="btn-sm" type="submit">Search</button>
   </form>
   <span class="spacer"></span>
   {% if resource.can_create %}
-    <a href="{% url 'core:manage_new' key=resource.key %}" class="btn btn-sm" data-modal style="display:inline-flex;align-items:center;gap:6px;">
+    <a href="{% url 'core:manage_new' key=resource.key %}" class="btn btn-sm toolbar-new" data-modal style="display:inline-flex;align-items:center;gap:6px;">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       New {{ resource.label }}</a>
   {% endif %}
 </div>
 
 <div class="card">
+  <div class="tbl-wrap">
   <table>
     <thead><tr>
       {% for h in headers %}<th>{{ h }}</th>{% endfor %}
@@ -47,6 +48,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% include "core/console/_pager.html" %}
 {% include "core/console/_modal.html" %}

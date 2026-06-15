@@ -1,7 +1,8 @@
 {% comment %}
 3-step upload wizard modal (Files → Details → Recipients). Opened by any element
 with [data-uw-open]. Uploads each file via the chunked endpoints with progress,
-then finalizes shared metadata + recipients in one call.
+then finalizes shared metadata + recipients in one call. The transport runs on
+this page, so we warn before a navigation would interrupt an in-flight upload.
 {% endcomment %}
 <style>
   .uw{position:fixed;inset:0;background:rgba(17,20,34,.55);display:flex;
@@ -128,6 +129,21 @@ then finalizes shared metadata + recipients in one call.
   .uw-mini-title{font-weight:600;font-size:14px;}
   .uw-mini-sub{color:var(--muted);font-size:12px;margin:2px 0 6px;}
   .uw-mini-bar{height:6px;border-radius:999px;background:#eef1f7;overflow:hidden;}
+  @media (max-width:768px){
+    .uw{padding:12px 10px;}
+    .uw-card{max-height:calc(100dvh - 24px);border-radius:14px;}
+    .uw-head{padding:16px 18px 12px;}
+    .uw-head h2{font-size:17px;}
+    .uw-steps{flex-wrap:wrap;gap:6px;font-size:12px;}
+    .uw-body{padding:8px 18px 16px;}
+    .uw-foot{padding:14px 18px;flex-wrap:wrap;}
+    .uw-2col{grid-template-columns:1fr;}
+    .uw-drop{padding:22px 14px;}
+    .uw-files{max-height:38vh;}
+    .uw-link .urlrow{flex-direction:column;}
+    .uw-recip-add{flex-direction:column;}
+    .uw-mini{right:12px;bottom:12px;width:calc(100vw - 24px);}
+  }
   .uw-mini-bar i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .15s;}
   .uw-mini-x{flex:none;background:#f1f3f9;border:0;border-radius:8px;width:28px;height:28px;font-size:16px;cursor:pointer;color:var(--muted);
     display:flex;align-items:center;justify-content:center;line-height:1;padding:0;}
@@ -311,33 +327,101 @@ then finalizes shared metadata + recipients in one call.
             status:m.dataset.status, incomplete:m.dataset.incomplete, cancel:m.dataset.cancel,
             finalize:m.dataset.finalize, mine:m.dataset.myuploads, csrf:m.dataset.csrf};
   const $ = (id)=>document.getElementById(id);
-  const files = [];            // {file, uuid, status, sent}
+  const ENDPOINTS = {init:U.init, chunk:U.chunk, complete:U.complete, cancel:U.cancel};
+  let jobs = [];               // latest worker snapshot: [{id,name,size,status,sent,uuid,error}]
   const recipients = [];
   let step = 1;
 
-  function open(preselectGroup){ reset(); m.hidden=false;
+  function newId(){ try{ return crypto.randomUUID(); }catch(e){ return 'j'+Date.now()+'-'+Math.round(Math.random()*1e9); } }
+  function human(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB';
+    if(n<1073741824)return (n/1048576).toFixed(1)+' MB'; return (n/1073741824).toFixed(1)+' GB'; }
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+  // Read a response as JSON, never throwing on an HTML error page.
+  async function readJson(resp){
+    const text = await resp.text();
+    try { return JSON.parse(text); }
+    catch(e){
+      const msg = resp.status === 413 ? 'File too large for the server.'
+        : resp.status === 504 || resp.status === 502 ? 'Server timed out — try again.'
+        : resp.status >= 500 ? 'Server error ('+resp.status+').'
+        : 'Unexpected server response ('+resp.status+').';
+      return {error: msg};
+    }
+  }
+
+  // ---- upload engine (in-page): chunked transport with a one-at-a-time queue.
+  //      Uploads live on this page, so navigating away interrupts them — we warn
+  //      before unload, and an interrupted transfer is resumable from the prompt.
+  const engine = (function(){
+    let onState = function(){};
+    const map = new Map();
+    function snap(){ return [...map.values()].map(j=>({id:j.id,name:j.name,size:j.size,status:j.status,sent:j.sent,uuid:j.uuid,error:j.error})); }
+    function emit(){ onState(snap()); }
+    function active(){ let n=0; map.forEach(j=>{ if(j.status==='uploading') n++; }); return n; }
+    function pump(){ if(active()>=1) return; let nx=null; map.forEach(j=>{ if(!nx&&j.status==='queued') nx=j; }); if(nx) run(nx); }
+    async function run(job){
+      job.status='uploading'; job.error=null; job.abort=false; emit();
+      try{
+        if(!job.token){
+          const ir=await fetch(ENDPOINTS.init,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},body:JSON.stringify({filename:job.name,size:job.size})});
+          const init=await readJson(ir);
+          if(!ir.ok||init.error){ job.status='error'; job.error=init.error||'Upload rejected'; emit(); pump(); return; }
+          job.token=init.token; job.partSize=init.part_size; job.sent=0;
+        }
+        const part=job.partSize; let off=job.sent;
+        while(off<job.size){
+          if(job.abort){ job.status='paused'; emit(); pump(); return; }
+          const pn=Math.floor(off/part)+1, blob=job.file.slice(off, off+part);
+          const fd=new FormData(); fd.append('token',job.token); fd.append('part_number',pn); fd.append('chunk',blob);
+          const r=await fetch(ENDPOINTS.chunk,{method:'POST',headers:{'X-CSRFToken':U.csrf},body:fd});
+          const j=await readJson(r);
+          if(!r.ok||j.error){ job.status='error'; job.error=j.error||('Upload failed ('+r.status+')'); emit(); pump(); return; }
+          off=(j.received!=null)?j.received:(off+blob.size); job.sent=Math.min(off,job.size); emit();
+        }
+        const cr=await fetch(ENDPOINTS.complete,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},body:JSON.stringify({token:job.token})});
+        const fin=await readJson(cr);
+        if(fin.file_uuid){ job.uuid=fin.file_uuid; job.status='done'; job.sent=job.size; }
+        else { job.status='error'; job.error=fin.error||'upload failed'; }
+      }catch(err){ job.status='error'; job.error=String(err); }
+      emit(); pump();
+    }
+    return {
+      onState:fn=>{ onState=fn; },
+      add:j=>{ if(!map.has(j.id)){ map.set(j.id,{id:j.id,name:j.name,size:j.size,file:j.file,status:'queued',sent:j.sent||0,token:j.token||null,partSize:j.partSize||0,uuid:null,error:null,abort:false}); emit(); pump(); } },
+      cancel:id=>{ const j=map.get(id); if(!j)return; j.abort=true; if(j.token){ fetch(ENDPOINTS.cancel,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},body:JSON.stringify({token:j.token})}).catch(()=>{}); } map.delete(id); emit(); pump(); },
+      retry:id=>{ const j=map.get(id); if(j){ j.status='queued'; j.error=null; emit(); pump(); } },
+      pause:id=>{ const j=map.get(id); if(j&&j.status==='uploading') j.abort=true; },
+      clearDone:()=>{ map.forEach((j,id)=>{ if(j.status==='done') map.delete(id); }); emit(); },
+    };
+  })();
+
+  // Worker state arrives here — re-render everything that depends on jobs.
+  engine.onState(function(snap){ jobs = snap; renderRows(); refreshNext(); autoToast(); });
+
+  function jget(id){ return jobs.find(j=>j.id===id); }
+  function jpct(j){ return Math.round((j.sent/(j.size||1))*100); }
+
+  function open(preselectGroup){ reset(); m.hidden=false; $('uwMini').hidden=true;
     if(preselectGroup){ addRecip(preselectGroup, preselectGroup, 'group'); }
-    loadIncomplete(); }
+    renderRows(); refreshNext(); loadIncomplete(); }
   function close(){ m.hidden=true; }
+  // Reset only the metadata FORM + step — never the jobs (they run in the worker).
   function reset(){
-    files.forEach(r=>{ if(r.ctrl) r.ctrl.abort(); });  // stop any in-flight transfers
-    files.length=0; recipients.length=0; step=1;
-    $('uwFiles').innerHTML=''; $('uwChips').innerHTML=''; $('uwInput').value='';
+    recipients.length=0; step=1;
+    $('uwChips').innerHTML=''; $('uwInput').value='';
     $('uwDesc').value=''; $('uwMsg').value=''; $('uwPublic').checked=false;
     $('uwPublicOpts').hidden=true;
-    $('uwDoneLinks').innerHTML=''; $('uwErr').hidden=true; $('uwOverall').hidden=true;
+    $('uwDoneLinks').innerHTML=''; $('uwErr').hidden=true;
     $('uwExpiry').value=''; $('uwExpiry').hidden=true; $('uwExpirySel').value='';
     $('uwDoneTitle').textContent='✓ Files sent';
     $('uwCat').value=''; $('uwNotify').checked=true;
-    // Reset all public-link toggles + reveals back to off/empty.
     ['uwVerify','uwPreviewOnly','uwPwdToggle','uwLimitToggle'].forEach(id=>{ if($(id)) $(id).checked=false; });
     if($('uwPwd')) $('uwPwd').value=''; if($('uwLimit')) $('uwLimit').value='';
     m.querySelectorAll('.lnk-reveal').forEach(r=>r.hidden=true);
     if (window.syncSelects) window.syncSelects(m);
     goStep(1);
   }
-  function human(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB';
-    if(n<1073741824)return (n/1048576).toFixed(1)+' MB'; return (n/1073741824).toFixed(1)+' GB'; }
 
   function goStep(n){
     step=n;
@@ -357,190 +441,89 @@ then finalizes shared metadata + recipients in one call.
     refreshNext();
   }
   function refreshNext(){
-    const done = files.filter(f=>f.status==='done').length;
-    const busy = files.some(f=>f.status==='uploading'||f.status==='queued');
+    const done = jobs.filter(j=>j.status==='done').length;
+    const busy = jobs.some(j=>j.status==='uploading'||j.status==='queued');
     if(step===1){ $('uwNext').disabled = done===0 || busy;
-      $('uwStatus').textContent = files.length ? `${files.length} file(s) · ${done} uploaded` : 'No files selected'; }
+      $('uwStatus').textContent = jobs.length ? `${jobs.length} file(s) · ${done} uploaded` : 'No files selected'; }
     updateOverall();
     updateMini();
   }
-  // Aggregate progress across all selected files (only shown for multi-file).
   function updateOverall(){
     const o=$('uwOverall'); if(!o) return;
-    if(files.length<2){ o.hidden=true; return; }
+    if(jobs.length<2){ o.hidden=true; return; }
     o.hidden=false;
-    const total=files.reduce((s,f)=>s+f.file.size,0)||1;
-    const sent=files.reduce((s,f)=>s+(f.status==='done'?f.file.size:(f.sent||0)),0);
-    const done=files.filter(f=>f.status==='done').length;
+    const total=jobs.reduce((s,j)=>s+j.size,0)||1;
+    const sent=jobs.reduce((s,j)=>s+(j.status==='done'?j.size:(j.sent||0)),0);
+    const done=jobs.filter(j=>j.status==='done').length;
     const pct=Math.min(100,Math.round(sent/total*100));
     $('uwOverallBar').style.width=pct+'%';
     $('uwOverallPct').textContent=pct+'%';
-    $('uwOverallTxt').textContent=`${done}/${files.length} files · ${human(sent)} of ${human(total)}`;
+    $('uwOverallTxt').textContent=`${done}/${jobs.length} files · ${human(sent)} of ${human(total)}`;
   }
 
-  // ---- file selection + upload ----
+  // ---- file selection ----
   $('uwDrop').addEventListener('click', ()=>$('uwInput').click());
   $('uwInput').addEventListener('change', e=>addFiles(e.target.files));
-  // Folder upload (Chromium/Safari): adds every file inside the chosen folder.
   $('uwFolderBtn').addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); $('uwInputDir').click(); });
   $('uwInputDir').addEventListener('change', e=>addFiles(e.target.files));
   ['dragover','dragenter'].forEach(ev=>$('uwDrop').addEventListener(ev,e=>{e.preventDefault();$('uwDrop').classList.add('over');}));
   ['dragleave','drop'].forEach(ev=>$('uwDrop').addEventListener(ev,e=>{e.preventDefault();$('uwDrop').classList.remove('over');}));
   $('uwDrop').addEventListener('drop', e=>{ if(e.dataTransfer.files) addFiles(e.dataTransfer.files); });
 
-  function fileSig(f){ return 'uw:'+f.name+'::'+f.size+'::'+(f.lastModified||0); }
-
-  // Read a response as JSON, but never throw "Unexpected token <" on an HTML
-  // error page (413/500/502 etc.) — return a clean {error} instead.
-  async function readJson(resp){
-    const text = await resp.text();
-    try { return JSON.parse(text); }
-    catch(e){
-      const msg = resp.status === 413 ? 'File too large for the server.'
-        : resp.status === 504 || resp.status === 502 ? 'Server timed out — try again.'
-        : resp.status >= 500 ? 'Server error ('+resp.status+').'
-        : 'Unexpected server response ('+resp.status+').';
-      return {error: msg};
-    }
-  }
-
-  // Upload one file at a time; the rest wait in a queue (like Dropbox).
-  const MAX_CONCURRENT = 1;
-  function activeCount(){ return files.filter(f=>f.status==='uploading').length; }
-  function pump(){
-    while(activeCount() < MAX_CONCURRENT){
-      const next = files.find(f=>f.status==='queued');
-      if(!next) break;
-      next.status='uploading';            // claim the slot before any await
-      setProg(next, pct(next), 'Starting…'); setActions(next);
-      startRec(next);
-    }
-  }
-
   function addFiles(list){
-    for(const f of list){
-      const rec={file:f,uuid:null,status:'queued',sent:0,token:null,partSize:0,ctrl:null};
-      files.push(rec); renderRow(rec); setProg(rec,0,'Waiting…');
-    }
-    pump(); refreshNext();
+    for(const f of list){ engine.add({id:newId(), name:f.name, size:f.size, file:f}); }
+    $('uwInput').value='';
   }
 
-  function renderRow(rec){
-    const row=document.createElement('div'); row.className='uw-frow'; rec.el=row;
-    row.innerHTML = `<div class="ic">${(rec.file.name.split('.').pop()||'?').slice(0,4).toUpperCase()}</div>
-      <div class="meta"><div class="nm"><span></span><span class="sz">${human(rec.file.size)}</span></div>
-      <div class="uw-bar"><i></i></div><div class="st">Starting…</div></div>
-      <div class="uw-act"></div>`;
-    row.querySelector('.nm span').textContent = rec.file.name;
-    $('uwFiles').appendChild(row);
-    setActions(rec);
+  // Re-render the whole file list from the current jobs snapshot.
+  function statusText(j){
+    if(j.status==='queued') return 'Waiting…';
+    if(j.status==='uploading') return human(j.sent)+' / '+human(j.size);
+    if(j.status==='paused') return 'Paused · '+human(j.sent)+' uploaded';
+    if(j.status==='error') return 'Error: '+(j.error||'upload failed');
+    if(j.status==='done') return 'Complete';
+    return '';
   }
-  function setProg(rec,pct,txt){ rec.el.querySelector('.uw-bar i').style.width=pct+'%'; rec.el.querySelector('.st').textContent=txt; updateOverall(); updateMini(); }
-  function pct(rec){ return Math.round((rec.sent/(rec.file.size||1))*100); }
-
-  // Render the per-row action buttons for the current state (Cancel / Retry / Remove).
-  function setActions(rec){
-    const a=rec.el.querySelector('.uw-act'); a.innerHTML='';
-    const mk=(cls,title,html,fn)=>{ const b=document.createElement('button');
-      b.type='button'; b.className=cls; b.title=title; b.innerHTML=html;
-      b.addEventListener('click',fn); a.appendChild(b); return b; };
-    if(rec.status==='queued'){
-      mk('uw-cancel','Cancel','Cancel', ()=>removeRec(rec));
-    } else if(rec.status==='uploading'){
-      mk('uw-cancel','Cancel','Cancel', ()=>pauseRec(rec));
-    } else if(rec.status==='paused' || rec.status==='error'){
-      mk('uw-retry','Retry','↻ Retry', ()=>retryRec(rec));
-      mk('rm','Remove','🗑', ()=>removeRec(rec));
-    } else if(rec.status==='done'){
-      mk('rm','Remove','🗑', ()=>removeRec(rec));
-    }
-  }
-
-  // Decide whether to resume an interrupted upload (same file seen before) or start fresh.
-  async function startRec(rec){
-    // Re-picked resume (from the incomplete-uploads prompt): token + offset known.
-    if(rec.token && rec.sent>0){ return uploadOne(rec, true); }
-    const sig=fileSig(rec.file);
-    const saved=localStorage.getItem(sig);
-    if(saved){
-      try{
-        const st=await readJson(await fetch(U.status+'?token='+encodeURIComponent(saved)));
-        if(st.resumable && st.declared_size===rec.file.size){
-          rec.token=st.token; rec.sent=st.received; rec.partSize=st.part_size;
-          return uploadOne(rec, true);
-        }
-      }catch(e){}
-      localStorage.removeItem(sig);
-    }
-    uploadOne(rec, false);
+  function renderRows(){
+    const box=$('uwFiles'); if(!box) return;
+    box.innerHTML = jobs.map(j=>{
+      const ext=(j.name.split('.').pop()||'?').slice(0,4).toUpperCase();
+      const pc = j.status==='done' ? 100 : Math.min(99, jpct(j));
+      return `<div class="uw-frow${j.status==='done'?' done':''}" data-id="${esc(j.id)}">
+        <div class="ic">${esc(ext)}</div>
+        <div class="meta"><div class="nm"><span>${esc(j.name)}</span><span class="sz">${human(j.size)}</span></div>
+        <div class="uw-bar"><i style="width:${pc}%"></i></div><div class="st">${esc(statusText(j))}</div></div>
+        <div class="uw-act"></div></div>`;
+    }).join('');
+    jobs.forEach(j=>{
+      const row=box.querySelector('[data-id="'+CSS.escape(j.id)+'"]'); if(!row) return;
+      const a=row.querySelector('.uw-act');
+      const mk=(cls,title,html,fn)=>{ const b=document.createElement('button'); b.type='button'; b.className=cls; b.title=title; b.innerHTML=html; b.addEventListener('click',fn); a.appendChild(b); };
+      if(j.status==='queued') mk('uw-cancel','Cancel','Cancel', ()=>engine.cancel(j.id));
+      else if(j.status==='uploading') mk('uw-cancel','Cancel','Cancel', ()=>engine.pause(j.id));
+      else if(j.status==='paused'||j.status==='error'){ mk('uw-retry','Retry','↻ Retry', ()=>engine.retry(j.id)); mk('rm','Remove','🗑', ()=>engine.cancel(j.id)); }
+      else if(j.status==='done') mk('rm','Remove','🗑', ()=>engine.cancel(j.id));
+    });
   }
 
-  async function uploadOne(rec, resuming){
-    rec.status='uploading'; rec.ctrl=new AbortController(); setActions(rec); refreshNext();
-    try{
-      if(!resuming){
-        const initResp=await fetch(U.init,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
-          body:JSON.stringify({filename:rec.file.name,size:rec.file.size})});
-        const init=await readJson(initResp);
-        if(!initResp.ok || init.error){ rec.status='error'; setProg(rec,pct(rec),init.error||'Upload rejected'); setActions(rec); refreshNext(); return; }
-        rec.token=init.token; rec.partSize=init.part_size; rec.sent=0;
-        localStorage.setItem(fileSig(rec.file), rec.token);
-      }
-      const part=rec.partSize;
-      let off=rec.sent;
-      while(off < rec.file.size){
-        const pn=Math.floor(off/part)+1;
-        const blob=rec.file.slice(off, off+part);
-        const fd=new FormData(); fd.append('token',rec.token); fd.append('part_number',pn); fd.append('chunk',blob);
-        const resp=await fetch(U.chunk,{method:'POST',headers:{'X-CSRFToken':U.csrf},body:fd, signal:rec.ctrl.signal});
-        const j=await readJson(resp);
-        if(!resp.ok || j.error){ rec.status='error'; setProg(rec,pct(rec),j.error||('Upload failed ('+resp.status+')')); setActions(rec); refreshNext(); return; }
-        off=(j.received!=null)?j.received:(off+blob.size);
-        rec.sent=Math.min(off, rec.file.size);
-        setProg(rec, Math.min(99,pct(rec)), human(rec.sent)+' / '+human(rec.file.size));
-      }
-      const finResp=await fetch(U.complete,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
-        body:JSON.stringify({token:rec.token})});
-      const fin=await readJson(finResp);
-      if(fin.file_uuid){ rec.uuid=fin.file_uuid; rec.status='done'; rec.el.classList.add('done');
-        setProg(rec,100,'Complete'); localStorage.removeItem(fileSig(rec.file)); }
-      else { rec.status='error'; setProg(rec,pct(rec),'Error: '+(fin.error||'upload failed')); }
-    }catch(err){
-      if(err.name==='AbortError'){ rec.status='paused'; rec.el.classList.remove('done'); setProg(rec,pct(rec),'Canceled · '+human(rec.sent)+' uploaded'); }
-      else { rec.status='error'; setProg(rec,pct(rec),'Error: '+err); }
-    }
-    setActions(rec); refreshNext();
-    pump();  // this slot is free — start the next queued file
-  }
-
-  // Cancel = pause now, keep progress so Retry can resume from where it stopped.
-  function pauseRec(rec){ if(rec.ctrl) rec.ctrl.abort(); }
-  // Retry re-queues so it still uploads one-at-a-time.
-  function retryRec(rec){ rec.status='queued'; setProg(rec, pct(rec), 'Waiting…'); setActions(rec); pump(); }
-  // Remove = abort + server-side cleanup + drop the row entirely.
-  function removeRec(rec){
-    if(rec.ctrl) rec.ctrl.abort();
-    if(rec.token){ fetch(U.cancel,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},
-      body:JSON.stringify({token:rec.token})}).catch(()=>{}); }
-    localStorage.removeItem(fileSig(rec.file));
-    const i=files.indexOf(rec); if(i>-1) files.splice(i,1);
-    rec.el.remove(); refreshNext(); pump();  // freed a slot — start the next queued file
-  }
-
-  // ---- resume incomplete uploads (interrupted by reload/crash) ----
-  let pendingResume = null;  // the session row awaiting a re-picked file
+  // ---- resume incomplete uploads (server sessions interrupted earlier) ----
+  let pendingResume = null;
   async function loadIncomplete(){
     const box=$('uwResume'); box.hidden=true; box.innerHTML='';
     let data;
     try{ data=await readJson(await fetch(U.incomplete)); }catch(e){ return; }
     const items=(data && data.items)||[];
-    if(!items.length) return;
-    box.innerHTML='<div class="uw-resume-h">⏳ Resume incomplete uploads ('+items.length+')</div>';
-    items.forEach(it=>{
+    // Hide sessions already represented by a live job (avoid duplicates).
+    const liveTokens = new Set();  // worker jobs don't expose tokens; rely on names+sizes
+    const liveKeys = new Set(jobs.map(j=>j.name+'::'+j.size));
+    const show = items.filter(it=>!liveKeys.has(it.filename+'::'+it.declared_size));
+    if(!show.length) return;
+    box.innerHTML='<div class="uw-resume-h">⏳ Resume incomplete uploads ('+show.length+')</div>';
+    show.forEach(it=>{
       const pctv=Math.round((it.received/(it.declared_size||1))*100);
       const row=document.createElement('div'); row.className='uw-rrow';
       row.innerHTML='<div class="meta"><div class="nm"></div>'+
-        '<div class="sub">'+human(it.received)+' of '+human(it.declared_size)+' uploaded · '+pctv+'%</div></div>'+
+        '<div class="sub">'+human(it.received)+' of '+human(it.declared_size)+' uploaded · '+pctv+'% · re-select the file to continue</div></div>'+
         '<button type="button" class="resume">Resume</button>'+
         '<button type="button" class="discard">Discard</button>';
       row.querySelector('.nm').textContent=it.filename;
@@ -554,7 +537,7 @@ then finalizes shared metadata + recipients in one call.
     });
     box.hidden=false;
   }
-  // User re-picks the file for a session → verify it matches, then resume.
+  // User re-picks the file for a session → verify it matches, then resume in the worker.
   $('uwResumeInput').addEventListener('change', e=>{
     const f=e.target.files[0]; const pr=pendingResume; pendingResume=null;
     if(!f || !pr) return;
@@ -562,11 +545,8 @@ then finalizes shared metadata + recipients in one call.
       alert('That file doesn’t match. Expected "'+pr.it.filename+'" ('+human(pr.it.declared_size)+').');
       return;
     }
-    const rec={file:f,uuid:null,status:'queued',sent:pr.it.received,token:pr.it.token,partSize:pr.it.part_size,ctrl:null};
-    files.push(rec); renderRow(rec); setProg(rec, pct(rec), 'Waiting…');
-    localStorage.setItem(fileSig(f), pr.it.token);
+    engine.add({id:newId(), name:f.name, size:f.size, file:f, token:pr.it.token, sent:pr.it.received, partSize:pr.it.part_size});
     pr.row.remove(); if(!$('uwResume').querySelector('.uw-rrow')) $('uwResume').hidden=true;
-    pump(); refreshNext();
   });
 
   // ---- recipients: searchable people & groups picker ----
@@ -640,7 +620,7 @@ then finalizes shared metadata + recipients in one call.
 
   $('uwSend').addEventListener('click', async ()=>{
     $('uwErr').hidden=true;
-    const uuids = files.filter(f=>f.status==='done').map(f=>f.uuid);
+    const uuids = jobs.filter(j=>j.status==='done').map(j=>j.uuid);
     if(!uuids.length){ showErr('No uploaded files to send.'); return; }
     // Recipients are optional — no destination just saves to My Files.
     $('uwSend').disabled=true; $('uwSend').textContent='Saving…';
@@ -690,46 +670,54 @@ then finalizes shared metadata + recipients in one call.
         navigator.clipboard.writeText(inp.value).then(()=>{ const t=b.textContent; b.textContent='Copied ✓';
           setTimeout(()=>b.textContent=t,1500); }).catch(()=>document.execCommand('copy'));
       }));
+      engine.clearDone();                              // consumed — drop them from the worker
       $('uwSend').hidden=true; $('uwStatus').textContent=''; goStep('done');
       $('uwCancel').addEventListener('click', ()=>{ window.location=U.mine; }, {once:true});
     }catch(err){ showErr('Error: '+err); $('uwSend').disabled=false; updateSendLabel(); }
   });
 
   // ---- minimize / restore (Dropbox-style background uploads) ----
-  function uploadsInFlight(){ return files.some(f=>f.status==='uploading'||f.status==='paused'); }
+  function hasJobs(){ return jobs.length > 0; }
   function minimize(){ m.hidden=true; $('uwMini').hidden=false; updateMini(); }
-  function restore(){ $('uwMini').hidden=true; m.hidden=false; }
+  function restore(){ $('uwMini').hidden=true; m.hidden=false; renderRows(); refreshNext(); loadIncomplete(); }
   function updateMini(){
     const mini=$('uwMini'); if(!mini || mini.hidden) return;
-    const total=files.reduce((s,f)=>s+f.file.size,0)||1;
-    const sent=files.reduce((s,f)=>s+(f.status==='done'?f.file.size:(f.sent||0)),0);
-    const uploading=files.filter(f=>f.status==='uploading').length;
-    const done=files.filter(f=>f.status==='done').length;
-    const failed=files.filter(f=>f.status==='error'||f.status==='paused').length;
+    const total=jobs.reduce((s,j)=>s+j.size,0)||1;
+    const sent=jobs.reduce((s,j)=>s+(j.status==='done'?j.size:(j.sent||0)),0);
+    const uploading=jobs.filter(j=>j.status==='uploading').length;
+    const done=jobs.filter(j=>j.status==='done').length;
+    const failed=jobs.filter(j=>j.status==='error'||j.status==='paused').length;
     const pctv=Math.min(100,Math.round(sent/total*100));
     $('uwMiniBar').style.width=pctv+'%';
-    if(uploading){ $('uwMiniTitle').textContent='Uploading '+(done+1)+' of '+files.length+' item'+(files.length>1?'s':'');
+    if(uploading){ $('uwMiniTitle').textContent='Uploading '+Math.min(done+1,jobs.length)+' of '+jobs.length+' item'+(jobs.length>1?'s':'');
       $('uwMiniSub').textContent=human(sent)+' of '+human(total)+' · '+pctv+'%'; }
     else if(failed){ $('uwMiniTitle').textContent=done+' done · '+failed+' need attention';
       $('uwMiniSub').textContent='Click to review'; }
     else { $('uwMiniTitle').textContent='Upload complete'; $('uwMiniSub').textContent='Click to add details & send'; }
   }
-  // Closing the X minimizes when uploads are still running; otherwise it closes.
+  // Closing the X minimizes when there are still jobs to deal with; else closes.
   function closeOrMinimize(){
-    if(step!=='done' && uploadsInFlight()){ minimize(); }
+    if(step!=='done' && hasJobs()){ minimize(); }
     else { close(); }
+  }
+  // Show the floating toast automatically whenever there are jobs and the modal
+  // is closed — this is how an in-progress upload stays visible after you switch
+  // pages (each page reconnects to the worker and re-renders this toast).
+  function autoToast(){
+    if(!m.hidden){ updateMini(); return; }              // modal open — it shows rows
+    if(hasJobs()){ $('uwMini').hidden=false; updateMini(); }
+    else { $('uwMini').hidden=true; }
   }
   $('uwMinBtn').addEventListener('click', minimize);
   $('uwMini').addEventListener('click', restore);
   $('uwMiniClose').addEventListener('click', e=>{ e.stopPropagation();
-    files.slice().forEach(removeRec); $('uwMini').hidden=true; close(); });
+    jobs.slice().forEach(j=>engine.cancel(j.id)); $('uwMini').hidden=true; close(); });
 
   // ---- open/close wiring ----
   document.addEventListener('click', e=>{
     const trigger = e.target.closest('[data-uw-open]');
     if(trigger){ e.preventDefault();
-      // A minimized upload is in progress — bring it back instead of resetting.
-      if(!$('uwMini').hidden){ restore(); }
+      if(!$('uwMini').hidden){ restore(); }            // bring back the minimized panel
       else { open(trigger.dataset.uwGroup || ''); }
     }
     if(e.target.closest('[data-uw-close]')){ e.preventDefault(); if(step==='done') window.location=U.mine; else closeOrMinimize(); }
@@ -737,10 +725,11 @@ then finalizes shared metadata + recipients in one call.
   });
   document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !m.hidden) closeOrMinimize(); });
 
-  // Warn before a reload/navigation drops an in-flight upload (the browser
-  // can't resume a transfer after reload without re-selecting the file).
+  // Uploads run on this page, so warn before a reload/navigation would interrupt
+  // an in-flight transfer. (An interrupted upload is still resumable from the
+  // "Resume incomplete uploads" prompt.)
   window.addEventListener('beforeunload', e=>{
-    if(files.some(f=>f.status==='uploading')){ e.preventDefault(); e.returnValue=''; return ''; }
+    if(jobs.some(j=>j.status==='uploading')){ e.preventDefault(); e.returnValue=''; return ''; }
   });
 })();
 </script>
