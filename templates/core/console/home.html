@@ -170,10 +170,6 @@
     <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 7l2-3h6l2 3h6v12H3z"/></svg></div>
     <div class="txt"><div class="nm">Categories</div><div class="ds">{{ counts.categories }} categor{{ counts.categories|pluralize:"y,ies" }}</div></div>
     <div class="cnt">{{ counts.categories }}</div></a>
-  <a class="acard" href="{% url 'core:manage_list' key='custom-fields' %}">
-    <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg></div>
-    <div class="txt"><div class="nm">Custom fields</div><div class="ds">{{ counts.custom_fields }} field{{ counts.custom_fields|pluralize }}</div></div>
-    <div class="cnt">{{ counts.custom_fields }}</div></a>
   <a class="acard" href="{% url 'core:manage_files' %}">
     <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 6h7l2 2h7v10H4z"/></svg></div>
     <div class="txt"><div class="nm">All files</div><div class="ds">{{ counts.files }} active file{{ counts.files|pluralize }}</div></div>

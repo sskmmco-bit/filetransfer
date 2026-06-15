@@ -21,6 +21,8 @@
   .fd-preview iframe{width:100%;height:70vh;border:1px solid var(--line);border-radius:10px;background:#fff;}
   .fd-noprev{color:var(--muted);text-align:center;padding:50px 20px;}
   .fd-noprev .big{font-size:46px;margin-bottom:10px;}
+  .fd-draftnote{background:var(--amber-bg);color:#b4730a;border:1px solid #f6dca4;border-radius:10px;
+    padding:9px 12px;font-size:12.5px;margin:14px 18px 0;}
   .fd-info{display:grid;grid-template-columns:1fr 1fr;gap:16px 18px;}
   .fd-info.full{grid-template-columns:1fr;}
   .fd-k{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);}
@@ -38,7 +40,6 @@
   .fd-btn.secondary{background:#fff;color:var(--accent2);border-color:var(--line);}
   .fd-btn.secondary:hover{background:#f5f6ff;}
   .fd-danger{margin-top:8px;border-top:1px dashed var(--line);padding-top:14px;}
-  .fd-danger .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--red);font-weight:700;margin-bottom:6px;}
   .fd-del{background:transparent;border:0;color:var(--red);font-weight:600;cursor:pointer;font-size:14px;padding:6px 0;}
   .fd-del:hover{text-decoration:underline;}
   .fd-urlrow{display:flex;gap:8px;margin-top:8px;}
@@ -112,26 +113,36 @@
   <div class="fd-card fd-preview">
     <div class="ph">
       <b>Preview</b>
-      {% if file.is_active and preview_kind != "none" %}
+      {% if preview_kind != "none" or can_review %}
         <a href="{% url 'files:preview' uuid=file.uuid %}" target="_blank" rel="noopener">Open in new tab ↗</a>
       {% endif %}
     </div>
+    {% if not file.is_active %}
+    <div class="fd-draftnote">⏳ Draft — not shared yet ({{ file.get_status_display }}). You can review it below before completing setup.</div>
+    {% endif %}
     <div class="body">
-      {% if not file.is_active %}
-        <div class="fd-noprev"><div class="big">⏳</div><p>This file isn't active yet ({{ file.get_status_display }}). No preview available.</p></div>
-      {% elif preview_kind == "image" %}
-        <img src="{{ preview_url }}" alt="{{ file.display_name }}">
+      {% if preview_kind == "image" %}
+        <img src="{{ preview_url }}" alt="{{ file.display_name }}" onerror="this.style.display='none';document.getElementById('fdPrevFail').style.display='block';">
       {% elif preview_kind == "pdf" %}
         <iframe src="{{ preview_url }}"></iframe>
       {% elif preview_kind == "video" %}
-        <video src="{{ preview_url }}" controls></video>
+        <video src="{{ preview_url }}" controls onerror="this.style.display='none';document.getElementById('fdPrevFail').style.display='block';"></video>
       {% elif preview_kind == "audio" %}
-        <audio src="{{ preview_url }}" controls style="width:100%;"></audio>
+        <audio src="{{ preview_url }}" controls style="width:100%;" onerror="this.style.display='none';document.getElementById('fdPrevFail').style.display='block';"></audio>
       {% elif preview_kind == "text" %}
         <iframe src="{{ preview_url }}"></iframe>
+      {% elif data_missing %}
+        <div class="fd-noprev"><div class="big">⚠️</div><p>This draft’s file data is no longer available.<br>It can’t be previewed or activated — delete the draft and re-upload.</p></div>
+      {% elif can_review %}
+        <div class="fd-noprev"><div class="big">📄</div><p>No inline preview for this file type.<br>
+          <a href="{% url 'files:preview' uuid=file.uuid %}" target="_blank" rel="noopener">Open / download to review ↗</a></p></div>
       {% else %}
         <div class="fd-noprev"><div class="big">📄</div><p>No inline preview for this file type.<br>Use Download to get the file.</p></div>
       {% endif %}
+      {# Shown only if the media element fails to load (e.g. bytes missing). #}
+      <div class="fd-noprev" id="fdPrevFail" style="display:none;"><div class="big">⚠️</div>
+        <p>Preview couldn’t be loaded.<br>
+        {% if can_review %}<a href="{% url 'files:preview' uuid=file.uuid %}" target="_blank" rel="noopener">Open / download to review ↗</a>{% else %}Use Download to get the file.{% endif %}</p></div>
     </div>
   </div>
 
@@ -154,9 +165,6 @@
       {% if file.description %}
       <div style="margin-top:16px;"><div class="fd-k">Description</div><div class="fd-v" style="font-weight:400;">{{ file.description }}</div></div>
       {% endif %}
-      {% for key, value in file.custom_fields.items %}
-      <div style="margin-top:14px;"><div class="fd-k">{{ key }}</div><div class="fd-v" style="font-weight:400;">{{ value }}</div></div>
-      {% endfor %}
       <div style="margin-top:16px;"><div class="fd-k">SHA-256</div><div class="fd-v mono">{{ file.sha256|default:"—" }}</div></div>
     </div></div>
 
@@ -175,7 +183,6 @@
       </div>
       {% if is_owner %}
       <div class="fd-danger">
-        <div class="lbl">Danger zone</div>
         <form method="post" action="{% url 'files:delete' uuid=file.uuid %}" id="fdDelForm">
           {% csrf_token %}
           <button type="button" class="fd-del"
@@ -189,14 +196,17 @@
     {% if is_owner and file.status == 'pending_metadata' %}
     <div class="fd-card"><div class="pad">
       <h3>Finish setup</h3>
+      {% if data_missing %}
+      <p class="hint" style="margin:0 0 14px;">This draft’s uploaded data is no longer available, so it can’t be shared. Delete it and upload the file again.</p>
+      {% else %}
       <p class="hint" style="margin:0 0 14px;">This file is uploaded but not shared yet. Add details and choose who can access it to make it active.</p>
       <div class="fd-actions">
         <a class="fd-btn primary" href="{% url 'files:edit' uuid=file.uuid %}" data-modal>
           <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg> Complete details &amp; share
         </a>
       </div>
+      {% endif %}
       <div class="fd-danger">
-        <div class="lbl">Danger zone</div>
         <form method="post" action="{% url 'files:delete' uuid=file.uuid %}" id="fdDelForm">
           {% csrf_token %}
           <button type="button" class="fd-del"

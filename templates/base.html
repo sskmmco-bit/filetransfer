@@ -325,9 +325,55 @@
     .sld-act-who{font-weight:600;font-size:14px;}
     .sld-act-action{font-size:13px;color:var(--ink);margin-top:1px;}
     .sld-act-meta{font-size:12px;color:var(--muted);margin-top:3px;}
+    /* config summary under the title */
+    .sld-summary{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;}
+    .sld-sum-item{display:flex;flex-direction:column;gap:3px;padding:10px 14px;border:1px solid var(--line);
+      border-radius:12px;background:#fafbff;min-width:140px;}
+    .sld-sum-item .fk{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;}
+    .sld-sum-item .fv{font-size:13px;font-weight:600;color:var(--ink);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;}
+    .sld-sum-item .ok{color:#0f7a52;} .sld-sum-item .off{color:var(--muted);font-weight:500;}
+    /* hero URL block in the link information card */
+    .sld-hero-url{background:#fafbff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;}
+    .sld-hero-url .uk{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;}
+    .sld-hero-url .uv{display:block;width:100%;border:0;background:transparent;padding:6px 0 0;font-size:16px;
+      font-weight:600;color:var(--ink);word-break:break-all;}
+    .sld-hero-url .uacts{display:flex;gap:8px;margin-top:12px;}
+    /* single-row overview metrics (replaces the duplicate perf/stats cards) */
+    .sld-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+    .sld-stats .box{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fafbff;}
+    .sld-stats .k{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600;}
+    .sld-stats .v{font-size:26px;font-weight:700;margin-top:4px;line-height:1.1;}
+    .sld-stats .v small{font-size:15px;color:var(--muted);font-weight:600;}
+    .sld-stats .v.sm{font-size:15px;}
+    .sld-stats .sub{font-size:12px;color:var(--muted);margin-top:4px;}
+    /* allowed-recipients status list */
+    .sld-recip{display:flex;flex-direction:column;}
+    .sld-recip .r{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid #f1f3f9;}
+    .sld-recip .r:first-child{border-top:0;}
+    .sld-recip .em{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .sld-recip .last{font-size:12px;color:var(--muted);flex:none;}
+    .sld-rtag{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;flex:none;}
+    .sld-rtag.dl{background:var(--green-bg);color:#0f7a52;}
+    .sld-rtag.vw{background:#eef0ff;color:#4f46e5;}
+    .sld-rtag.no{background:#eef1f7;color:#64748b;}
+    /* prominent empty state */
+    .sld-empty{text-align:center;padding:34px 20px;}
+    .sld-empty .ic{width:48px;height:48px;border-radius:14px;background:#f4f7f0;display:flex;
+      align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px;}
+    .sld-empty .t{font-weight:700;font-size:15px;color:var(--ink);}
+    .sld-empty .s{font-size:13px;color:var(--muted);margin-top:4px;}
+    /* action-button hierarchy in the sidebar */
+    .sld-zones{margin-top:16px;border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:14px;}
+    .sld-zone .zh{font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:var(--muted);margin-bottom:7px;}
+    .sld-zone.danger .zh{color:var(--red);}
+    .sld-zone form{display:block;}
+    .sld-zone .lnk-mini{width:100%;text-align:center;}
+    .sld-zone.warn .lnk-mini{color:#b4730a;border-color:#f0d9ad;}
+    .sld-zone.warn .lnk-mini:hover{background:var(--amber-bg);}
     @media (max-width:900px){
       .sld-kpi{grid-template-columns:1fr 1fr;}
       .sld-perf{grid-template-columns:1fr;}
+      .sld-stats{grid-template-columns:1fr 1fr;}
     }
 
     /* ---- shared file list (My Files / Shared with Me / Group space) ---- */
@@ -533,9 +579,9 @@
       <a href="{% url 'core:console_home' %}" class="nav-item {% if vn == 'core:console_home' %}active{% endif %}">
         <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg> Admin Console</a>
       <a href="{% url 'core:manage_list' key='users' %}" class="nav-item {% if request.path == '/console/users/' %}active{% endif %}">
-        <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="18" cy="9" r="2"/></svg> Users</a>
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3.5-6.5 7-6.5s7 2.5 7 6.5"/></svg> Users</a>
       <a href="{% url 'core:manage_list' key='groups' %}" class="nav-item {% if request.path == '/console/groups/' %}active{% endif %}">
-        <svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2"/><path d="M2 20c0-3 3-5 6-5s6 2 6 5"/></svg> Groups</a>
+        <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Groups</a>
       <a href="{% url 'core:manage_files' %}" class="nav-item {% if vn == 'core:manage_files' %}active{% endif %}">
         <svg viewBox="0 0 24 24"><path d="M4 4h7l2 2h7v12H4z"/></svg> All Files</a>
       <a href="{% url 'core:manage_trash' %}" class="nav-item {% if vn == 'core:manage_trash' %}active{% endif %}">

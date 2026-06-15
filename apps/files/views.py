@@ -262,7 +262,10 @@ def upload_cancel(request):
             storage.abort_multipart(sf.temp_key, session.multipart_upload_id)
         storage.delete_object(sf.temp_key)
         session.delete()
-        if sf.status == FileStatus.UPLOADING:  # never activated — drop the row
+        # Cancelling discards the whole upload. A draft that finished its transfer
+        # but was never activated (PENDING_METADATA) must be dropped too — otherwise
+        # we'd leave a byte-less draft row that can't be previewed or activated.
+        if sf.status in (FileStatus.UPLOADING, FileStatus.PENDING_METADATA):
             sf.delete()
     return JsonResponse({"ok": True})
 
@@ -421,9 +424,8 @@ def edit(request, uuid):
         if form.is_valid():
             if not form.cleaned_data.get("title"):
                 sf.title = sf.original_filename
-            sf.custom_fields = form.custom_field_values()
-            form.save()  # saves scalar fields + categories M2M (+ custom_fields via instance)
-            sf.save(update_fields=["custom_fields", "title"])
+            form.save()  # saves scalar fields + categories M2M
+            sf.save(update_fields=["title"])
             # Expand selected groups into individual recipients (Phase 5) and
             # place the file into each group's shared space.
             recipient_ids = {u.pk for u in form.cleaned_data["recipients"]}
@@ -432,11 +434,18 @@ def edit(request, uuid):
                 recipient_ids.update(group.members.values_list("pk", flat=True))
             if selected_groups:
                 sf.groups.add(*selected_groups)
-            services.activate_file(
-                sf.pk,
-                recipient_ids=recipient_ids,
-                assigned_by=request.user,
-            )
+            try:
+                services.activate_file(
+                    sf.pk,
+                    recipient_ids=recipient_ids,
+                    assigned_by=request.user,
+                )
+            except ValidationError as exc:
+                # e.g. the uploaded bytes were cleaned up — show it, don't 500.
+                form.add_error(None, "; ".join(exc.messages))
+                tmpl = "files/_edit_form.html" if ajax else "files/edit.html"
+                return render(request, tmpl, {"form": form, "file": sf},
+                              status=422 if ajax else 200)
             # Marking the file public on activation mints a share link for it.
             if form.cleaned_data.get("is_public"):
                 sharelinks.create_link(
@@ -630,6 +639,19 @@ def preview_kind(content_type: str, filename: str) -> str:
     return "none"
 
 
+def _preview_object_key(sf) -> str:
+    """The MinIO key holding the bytes to preview/review, or '' if none.
+
+    ACTIVE files live at their final storage_key; a PENDING_METADATA draft is
+    still at its temp_key (so it can be reviewed before metadata is completed).
+    """
+    if sf.status == FileStatus.ACTIVE:
+        return sf.storage_key
+    if sf.status == FileStatus.PENDING_METADATA:
+        return sf.temp_key
+    return ""
+
+
 @login_required
 def detail(request, uuid):
     sf = get_object_or_404(StoredFile, uuid=uuid)
@@ -637,16 +659,28 @@ def detail(request, uuid):
     if not _can_access(sf, request.user):
         raise PermissionDenied("You do not have access to this file.")
 
-    kind = preview_kind(sf.content_type, sf.original_filename) if sf.is_active else "none"
+    # A file can be reviewed before it's activated: an ACTIVE file lives at its
+    # final storage_key, a PENDING_METADATA draft still at its temp_key.
+    obj_key = _preview_object_key(sf)
+    # A draft's temp object can be swept by the abandoned-upload cleanup, leaving
+    # a "dead" draft with no bytes — detect that so we show a clear message
+    # instead of a broken preview.
+    data_missing = bool(obj_key) and not sf.is_active and not storage.object_exists(obj_key)
+    if data_missing:
+        obj_key = ""
+    kind = preview_kind(sf.content_type, sf.original_filename) if obj_key else "none"
     preview_url = ""
     if kind != "none":
         preview_url = storage.presigned_get_url(
-            sf.storage_key, download_name=sf.original_filename,
+            obj_key, download_name=sf.original_filename,
             inline=True, content_type=sf.content_type,
         )
+    # Owner can still open/download a non-previewable draft to review it.
+    can_review = is_owner and bool(obj_key)
 
-    ctx = {"file": sf, "is_owner": is_owner,
-           "preview_kind": kind, "preview_url": preview_url}
+    ctx = {"file": sf, "is_owner": is_owner, "can_review": can_review,
+           "preview_kind": kind, "preview_url": preview_url,
+           "data_missing": data_missing}
     if is_owner and sf.is_active:
         ctx.update(_share_context(sf, request.user))
         # This file's share links (a file can have several), newest first.
@@ -690,12 +724,22 @@ def _share_context(sf, owner):
 @login_required
 @require_GET
 def preview(request, uuid):
-    """Authorize, then redirect to an inline presigned URL (open in new tab)."""
-    sf = get_object_or_404(StoredFile, uuid=uuid, status=FileStatus.ACTIVE)
+    """Authorize, then redirect to an inline presigned URL (open in new tab).
+
+    Works for ACTIVE files and for the owner's PENDING_METADATA draft (served
+    from its temp_key) so a file can be reviewed before metadata is completed.
+    """
+    sf = get_object_or_404(
+        StoredFile, uuid=uuid,
+        status__in=[FileStatus.ACTIVE, FileStatus.PENDING_METADATA],
+    )
     if not _can_access(sf, request.user):
         raise PermissionDenied("You do not have access to this file.")
+    obj_key = _preview_object_key(sf)
+    if not obj_key:
+        raise Http404("Nothing to preview.")
     url = storage.presigned_get_url(
-        sf.storage_key, download_name=sf.original_filename,
+        obj_key, download_name=sf.original_filename,
         inline=True, content_type=sf.content_type,
     )
     return HttpResponseRedirect(url)
@@ -880,11 +924,37 @@ def share_link_detail(request, token):
     activity.sort(key=lambda a: a["when"], reverse=True)
     activity = activity[:60]
 
+    # Per-recipient engagement for email-restricted links (§5.4) — lets the
+    # owner see, at a glance, who has opened/downloaded vs. never engaged.
+    recipients = []
+    if link.allowed_emails:
+        engagement: dict = {}
+        for a in activity:
+            em = (a.get("email") or "").strip().lower()
+            if not em:
+                continue
+            e = engagement.setdefault(em, {"viewed": False, "downloaded": False, "last": None})
+            if a["kind"] == "view":
+                e["viewed"] = True
+            elif a["kind"] == "download":
+                e["downloaded"] = True
+            if e["last"] is None or a["when"] > e["last"]:
+                e["last"] = a["when"]
+        for em in link.allowed_emails:
+            st = engagement.get((em or "").strip().lower(), {})
+            recipients.append({
+                "email": em,
+                "viewed": st.get("viewed", False),
+                "downloaded": st.get("downloaded", False),
+                "last": st.get("last"),
+            })
+
     return render(request, "files/share_link_detail.html", {
         "link": link, "files": files, "public_url": link.build_url(request),
         "activity": activity, "preview_url_name": "files:preview",
         "unique_visitors": len(visitor_keys),
         "last_access": last_access,
+        "recipients": recipients,
     })
 
 

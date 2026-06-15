@@ -10,7 +10,6 @@ from django.contrib.auth import get_user_model
 from django.utils.text import slugify
 
 from apps.accounts.models import Group, Permission, Role, RolePermission
-from apps.config.models import CustomField
 from apps.files.models import Category
 
 User = get_user_model()
@@ -111,9 +110,3 @@ class CategoryAdminForm(forms.ModelForm):
     class Meta:
         model = Category
         fields = ("name", "description")
-
-
-class CustomFieldAdminForm(forms.ModelForm):
-    class Meta:
-        model = CustomField
-        fields = ("key", "label", "field_type", "required", "active", "order")

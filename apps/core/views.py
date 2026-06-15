@@ -199,7 +199,6 @@ def console_home(request):
 
     # Counts for the "Manage" cards so each tile is informative at a glance.
     from apps.accounts.models import Group, Role
-    from apps.config.models import CustomField
     from apps.files.models import Category
 
     counts = {
@@ -207,7 +206,6 @@ def console_home(request):
         "groups": Group.objects.count(),
         "roles": Role.objects.count(),
         "categories": Category.objects.count(),
-        "custom_fields": CustomField.objects.count(),
         "files": storage["total_files"],
     }
 

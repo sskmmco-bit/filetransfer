@@ -19,7 +19,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from apps.accounts.models import Group, Permission, Role
-from apps.config.models import CustomField
 from apps.files.models import Category
 
 from . import management_forms as mf
@@ -58,10 +57,6 @@ REGISTRY: dict[str, Resource] = {
                  [("Name", "name"), ("Description", "description")], search=["name"]),
         Resource("categories", "Categories", Category, mf.CategoryAdminForm,
                  [("Name", "name"), ("Slug", "slug")], search=["name"]),
-        Resource("custom-fields", "Custom fields", CustomField, mf.CustomFieldAdminForm,
-                 [("Label", "label"), ("Key", "key"), ("Type", "field_type"),
-                  ("Required", "required"), ("Active", "active"), ("Order", "order")],
-                 search=["label", "key"]),
     ]
 }
 

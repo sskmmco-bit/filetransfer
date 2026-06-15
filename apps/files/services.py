@@ -125,6 +125,13 @@ def activate_file(stored_file_id: int, *, recipient_ids=None, assigned_by=None,
     if sf.status == FileStatus.ACTIVE:
         return sf
 
+    # The uploaded bytes may have been removed (e.g. a cancelled/abandoned upload
+    # was cleaned up) — fail clearly instead of letting CopyObject raise NoSuchKey.
+    if not sf.temp_key or not storage.object_exists(sf.temp_key):
+        raise ValidationError(
+            "The uploaded file data is no longer available. "
+            "Please delete this draft and upload the file again."
+        )
     sf.uploaded_at = timezone.now()
     sf.storage_key = sf.build_storage_key()
     storage.copy_object(sf.temp_key, sf.storage_key)

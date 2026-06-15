@@ -87,7 +87,8 @@ class StoredFile(models.Model):
         settings.AUTH_USER_MODEL, through="StarredFile",
         related_name="starred_files", blank=True,
     )
-    # Admin-defined custom metadata values, keyed by CustomField.key (Phase 5).
+    # Dormant: the custom-fields feature was removed from the UI. Column kept to
+    # avoid a destructive migration; no code reads or writes it anymore.
     custom_fields = models.JSONField(default=dict, blank=True)
 
     # Public sharing (link minting is Phase 3; the columns live here now).

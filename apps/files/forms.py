@@ -10,7 +10,6 @@ from django import forms
 from django.contrib.auth import get_user_model
 
 from apps.accounts.models import Group
-from apps.config.models import CustomField
 
 from .models import Category, StoredFile
 
@@ -57,28 +56,6 @@ class MetadataForm(forms.ModelForm):
             "expiry_date": forms.DateInput(attrs={"type": "date"}),
         }
 
-    # Build the field name for a custom field.
-    CF_PREFIX = "cf_"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._custom_fields = list(CustomField.objects.filter(active=True))
-        existing = (self.instance.custom_fields or {}) if self.instance else {}
-        for cf in self._custom_fields:
-            name = f"{self.CF_PREFIX}{cf.key}"
-            initial = existing.get(cf.key)
-            if cf.field_type == CustomField.FieldType.NUMBER:
-                field = forms.FloatField(required=cf.required, initial=initial)
-            elif cf.field_type == CustomField.FieldType.DATE:
-                field = forms.DateField(required=cf.required, initial=initial,
-                                        widget=forms.DateInput(attrs={"type": "date"}))
-            elif cf.field_type == CustomField.FieldType.BOOLEAN:
-                field = forms.BooleanField(required=False, initial=bool(initial))
-            else:
-                field = forms.CharField(required=cf.required, initial=initial)
-            field.label = cf.label
-            self.fields[name] = field
-
     def clean(self):
         cleaned = super().clean()
         if cleaned.get("public_require_email_verify") and not cleaned.get("is_public"):
@@ -87,13 +64,3 @@ class MetadataForm(forms.ModelForm):
                 "Email verification only applies to public files.",
             )
         return cleaned
-
-    def custom_field_values(self) -> dict:
-        """Collect the custom-field inputs into a JSON-serializable dict."""
-        out = {}
-        for cf in self._custom_fields:
-            val = self.cleaned_data.get(f"{self.CF_PREFIX}{cf.key}")
-            if val in (None, ""):
-                continue
-            out[cf.key] = val.isoformat() if hasattr(val, "isoformat") else val
-        return out

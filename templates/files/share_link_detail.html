@@ -25,8 +25,8 @@
   .sld-act:first-of-type{border-top:0;}
   .sld-act .dot{width:10px;height:10px;border-radius:50%;flex:none;margin-top:5px;}
   .sld-act .dot.view{background:#4f46e5;} .sld-act .dot.download{background:#0f9d6b;}
-  .sld-side{position:sticky;top:20px;}
-  @media (max-width:900px){ .sld-grid{grid-template-columns:1fr;} .sld-side{position:static;} }
+  .sld-main{position:sticky;top:24px;display:flex;flex-direction:column;gap:18px;}
+  @media (max-width:900px){ .sld-grid{grid-template-columns:1fr;} .sld-main{position:static;} }
 </style>
 
 <a class="fd-back" href="{% url 'files:share_links' %}" style="display:inline-flex;gap:6px;color:var(--muted);margin-bottom:14px;font-size:13px;">← Back to Shared Links</a>
@@ -38,25 +38,49 @@
     {% elif link.is_expired %}<span class="sld-status-pill exp">● Expired</span>
     {% else %}<span class="sld-status-pill live">🟢 Active</span>{% endif %}
     <span class="sld-meta-chip">Created {{ link.created_at|date:"M j, Y" }}</span>
-    <span class="sld-meta-chip">{% if link.expires_at %}Expires {{ link.expires_at|date:"M j, Y" }}{% else %}No expiration{% endif %}</span>
-    {% if link.download_limit %}
-    <span class="sld-meta-chip"><b>{{ link.downloads_remaining }}</b> download{{ link.downloads_remaining|pluralize }} remaining</span>
-    {% endif %}
-    {% if link.days_remaining is not None and link.days_remaining >= 0 and not link.is_expired %}
-    <span class="sld-meta-chip">{{ link.days_remaining }} day{{ link.days_remaining|pluralize }} left</span>
-    {% endif %}
+  </div>
+
+  {# At-a-glance configuration so the owner understands the link without opening Settings. #}
+  <div class="sld-summary">
+    <div class="sld-sum-item">
+      <span class="fk">Access</span>
+      <span class="fv">
+        {% if link.allowed_emails %}<span class="ok">✓ Restricted to {{ link.allowed_emails|length }} email{{ link.allowed_emails|length|pluralize }}</span>
+        {% elif link.require_email_verify %}<span class="ok">✓ Email verification</span>
+        {% else %}<span class="off">Anyone with the link</span>{% endif %}
+      </span>
+    </div>
+    <div class="sld-sum-item">
+      <span class="fk">Protection</span>
+      <span class="fv">
+        {% if not link.allow_download %}<span class="ok">✓ Preview only</span>{% endif %}
+        {% if link.has_password %}<span class="ok">✓ Password</span>{% endif %}
+        {% if link.allow_download and not link.has_password %}<span class="off">None</span>{% endif %}
+      </span>
+    </div>
+    <div class="sld-sum-item">
+      <span class="fk">Downloads</span>
+      <span class="fv">{% if link.download_limit %}{{ link.download_count }} of {{ link.download_limit }} used{% else %}<span class="off">Unlimited</span>{% endif %}</span>
+    </div>
+    <div class="sld-sum-item">
+      <span class="fk">Expires</span>
+      <span class="fv">{% if link.expires_at %}{{ link.expires_at|date:"M j, Y" }}{% if link.days_remaining is not None and link.days_remaining >= 0 and not link.is_expired %} · {{ link.days_remaining }}d left{% endif %}{% else %}<span class="off">Never</span>{% endif %}</span>
+    </div>
   </div>
 </div>
 
 <div class="sld-grid">
-  <div style="display:flex;flex-direction:column;gap:18px;">
+  <div class="sld-main">
     {# Link information: URL + compact file list #}
     <div class="sld-card"><div class="pad">
-      <h3>Link information</h3>
-      <div class="lnk-urlrow">
-        <input type="text" id="sldUrl" readonly value="{{ public_url }}">
-        <button type="button" class="lnk-mini" id="sldCopy">Copy</button>
-        <a class="lnk-mini" href="{{ public_url }}" target="_blank" rel="noopener">Open</a>
+      <h3>Public link</h3>
+      <div class="sld-hero-url">
+        <span class="uk">Share this URL</span>
+        <input type="text" class="uv" id="sldUrl" readonly value="{{ public_url }}">
+        <div class="uacts">
+          <button type="button" class="lnk-mini" id="sldCopy">Copy link</button>
+          <a class="lnk-mini" href="{{ public_url }}" target="_blank" rel="noopener">Open</a>
+        </div>
       </div>
       {% if files %}
       <div class="sld-files-compact" style="margin-top:16px;">
@@ -87,44 +111,48 @@
       {% endif %}
     </div></div>
 
-    {# Link performance analytics #}
+    {# Single overview row — merges the old "Link performance" + "Statistics". #}
     <div class="sld-card"><div class="pad">
-      <h3>Link performance</h3>
-      <div class="sld-perf">
-        <div class="item"><div class="pk">Views</div><div class="pv">{{ link.view_count }}</div></div>
-        <div class="item"><div class="pk">Downloads</div><div class="pv">{{ link.download_count }}</div></div>
-        <div class="item"><div class="pk">Unique visitors</div><div class="pv">{{ unique_visitors }}</div></div>
-        <div class="item"><div class="pk">Last access</div>
-          <div class="pv" style="font-size:15px;">{% if last_access %}{{ last_access|date:"j M Y, H:i" }}{% else %}—{% endif %}</div>
-        </div>
-      </div>
-    </div></div>
-
-    {# Statistics KPI cards #}
-    <div class="sld-card"><div class="pad">
-      <h3>Statistics</h3>
-      <div class="sld-kpi">
+      <h3>Overview</h3>
+      <div class="sld-stats">
         <div class="box"><div class="k">Views</div><div class="v">{{ link.view_count }}</div></div>
         <div class="box">
           <div class="k">Downloads</div>
-          <div class="v">{{ link.download_count }}{% if link.download_limit %}<span style="font-size:16px;color:var(--muted);"> / {{ link.download_limit }}</span>{% endif %}</div>
+          <div class="v">{{ link.download_count }}{% if link.download_limit %}<small> / {{ link.download_limit }}</small>{% endif %}</div>
           {% if link.download_limit %}
           <div class="sld-prog"><i style="width:{% widthratio link.download_count link.download_limit 100 %}%;"></i></div>
-          <div class="sub">Remaining: {{ link.downloads_remaining }}</div>
+          <div class="sub">{{ link.downloads_remaining }} remaining</div>
           {% endif %}
         </div>
         <div class="box"><div class="k">Visitors</div><div class="v">{{ unique_visitors }}</div></div>
         <div class="box">
-          <div class="k">Days remaining</div>
-          <div class="v">{% if link.days_remaining is not None %}{{ link.days_remaining }}{% else %}∞{% endif %}</div>
-          {% if link.expires_at %}<div class="sub">Until {{ link.expires_at|date:"M j, Y" }}</div>{% endif %}
+          <div class="k">Last access</div>
+          <div class="v sm">{% if last_access %}{{ last_access|date:"j M, H:i" }}{% else %}—{% endif %}</div>
         </div>
       </div>
     </div></div>
 
+    {# Allowed recipients — who has opened/downloaded (email-restricted links only). #}
+    {% if recipients %}
+    <div class="sld-card"><div class="pad">
+      <h3>Allowed recipients</h3>
+      <div class="sld-recip">
+        {% for r in recipients %}
+        <div class="r">
+          <span class="em">{{ r.email }}</span>
+          {% if r.last %}<span class="last">{{ r.last|date:"j M, H:i" }}</span>{% endif %}
+          {% if r.downloaded %}<span class="sld-rtag dl">Downloaded</span>
+          {% elif r.viewed %}<span class="sld-rtag vw">Viewed</span>
+          {% else %}<span class="sld-rtag no">Never opened</span>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div></div>
+    {% endif %}
+
     {# Activity feed #}
     <div class="sld-card"><div class="pad">
-      <h3>Activity</h3>
+      <h3>Recent activity</h3>
       {% for a in activity %}
       <div class="sld-act">
         <span class="dot {{ a.kind }}"></span>
@@ -137,13 +165,17 @@
         </div>
       </div>
       {% empty %}
-      <p class="hint" style="margin:0;">No activity yet. Views and downloads will show up here — including the visitor's email on tracked links.</p>
+      <div class="sld-empty">
+        <div class="ic">📡</div>
+        <div class="t">No visits yet</div>
+        <div class="s">Share this link to start tracking activity.<br>Views and downloads — including each visitor's verified email — will appear here.</div>
+      </div>
       {% endfor %}
     </div></div>
   </div>
 
-  {# RIGHT: grouped link settings #}
-  <div class="sld-side">
+  {# RIGHT: grouped link settings — scrolls past the pinned left column #}
+  <div>
     <div class="sld-card"><div class="pad">
       <h3>Link settings</h3>
       <form method="post" action="{% url 'files:share_link_update' token=link.token %}" id="sldForm">
@@ -214,14 +246,23 @@
         <button type="submit" class="fd-btn primary" style="width:100%;margin-top:14px;">Save link settings</button>
       </form>
 
-      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-        <form method="post" action="{% url 'files:share_link_rotate' token=link.token %}">{% csrf_token %}
-          <button type="submit" class="lnk-mini">↻ Rotate token</button></form>
-        <form method="post" action="{% url 'files:share_link_toggle' token=link.token %}">{% csrf_token %}
-          <button type="submit" class="lnk-mini">{% if link.is_active %}Disable{% else %}Enable{% endif %}</button></form>
-        <form method="post" action="{% url 'files:share_link_delete' token=link.token %}" id="sldDelForm">{% csrf_token %}
-          <button type="button" class="lnk-mini danger"
-            onclick="confirmAction({title:'Delete link?',message:'Delete “{{ link.name|escapejs }}”? It stops working immediately. Files are not deleted.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('sldDelForm').submit();}})">Delete</button></form>
+      <div class="sld-zones">
+        <div class="sld-zone">
+          <div class="zh">Maintenance</div>
+          <form method="post" action="{% url 'files:share_link_rotate' token=link.token %}">{% csrf_token %}
+            <button type="submit" class="lnk-mini">↻ Rotate token</button></form>
+        </div>
+        <div class="sld-zone warn">
+          <div class="zh">Availability</div>
+          <form method="post" action="{% url 'files:share_link_toggle' token=link.token %}">{% csrf_token %}
+            <button type="submit" class="lnk-mini">{% if link.is_active %}Disable link{% else %}Enable link{% endif %}</button></form>
+        </div>
+        <div class="sld-zone danger">
+          <div class="zh">Danger zone</div>
+          <form method="post" action="{% url 'files:share_link_delete' token=link.token %}" id="sldDelForm">{% csrf_token %}
+            <button type="button" class="lnk-mini danger"
+              onclick="confirmAction({title:'Delete link?',message:'Delete “{{ link.name|escapejs }}”? It stops working immediately. Files are not deleted.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('sldDelForm').submit();}})">Delete link</button></form>
+        </div>
       </div>
     </div></div>
   </div>

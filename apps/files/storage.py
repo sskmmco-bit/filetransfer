@@ -108,6 +108,17 @@ def head_object(key: str) -> dict:
     return get_client().head_object(Bucket=bucket(), Key=key)
 
 
+def object_exists(key: str) -> bool:
+    """True if an object is present at `key` (a HEAD that doesn't 404)."""
+    if not key:
+        return False
+    try:
+        get_client().head_object(Bucket=bucket(), Key=key)
+        return True
+    except Exception:  # noqa: BLE001 — any error (incl. 404) means "not usable"
+        return False
+
+
 def get_object_body(key: str):
     """Return a streaming body for reading an object (e.g. to hash it)."""
     return get_client().get_object(Bucket=bucket(), Key=key)["Body"]
