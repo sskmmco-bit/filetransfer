@@ -69,8 +69,9 @@ class SiteSettings(models.Model):
     retention_days = models.PositiveSmallIntegerField(default=5)
 
     # Default per-user storage quota in GB (§quota). 0 => unlimited. Applied to
-    # users whose own quota_bytes is NULL.
-    default_user_quota_gb = models.PositiveIntegerField(default=0)
+    # users whose own quota_bytes is NULL — i.e. every account that isn't given
+    # an explicit quota (LDAP imports, JIT logins, plain console creates).
+    default_user_quota_gb = models.PositiveIntegerField(default=2)
 
     # ----- LDAP (§5.7.3) — config ships in Phase 1; settings UI in Phase 6 -----
     ldap_enabled = models.BooleanField(default=False)

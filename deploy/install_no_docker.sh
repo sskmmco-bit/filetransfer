@@ -1,0 +1,320 @@
+#!/usr/bin/env bash
+# =============================================================================
+# MMFileTransfer — one-command installer (no Docker, Ubuntu/Debian)
+# -----------------------------------------------------------------------------
+# Installs and starts the whole stack (PostgreSQL, Redis, MinIO, Gunicorn,
+# Celery worker + beat, nginx) on a clean Linux server. Needs internet ONLY
+# while running; the app runs fully offline afterward.
+#
+# USAGE — copy the repo to the server, then run ONE command from the repo root:
+#
+#     sudo bash deploy/install_no_docker.sh
+#
+# It auto-detects the server's IP. To force a specific IP/hostname:
+#
+#     sudo SERVER_IP=10.20.30.40 bash deploy/install_no_docker.sh
+#
+# Strong passwords + secrets are generated automatically and saved (root-only)
+# to /opt/mmftp/.install-credentials. The admin login is printed at the end.
+# Re-running is safe (idempotent).
+#
+# Targets Ubuntu/Debian (apt). For RHEL/Rocky, ask the dev team for the dnf
+# variant (Postgres pg_hba + SELinux differ).
+# =============================================================================
+set -euo pipefail
+
+BASE=/opt/mmftp
+APP=$BASE/app
+VENV=$BASE/venv
+DATA=$BASE/minio-data
+ENVF=$BASE/.env
+CREDS=$BASE/.install-credentials
+
+ADMIN_USER="${ADMIN_USER:-admin}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@mm.co.in}"
+
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
+log()  { echo -e "\n\033[1;36m==> $*\033[0m"; }
+die()  { echo -e "\n\033[1;31mERROR: $*\033[0m" >&2; exit 1; }
+gen()  { tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-24}"; }
+
+[[ $EUID -eq 0 ]] || die "Run with sudo:  sudo bash deploy/install_no_docker.sh"
+command -v apt-get >/dev/null || die "This installer targets Ubuntu/Debian (apt). Ask for the RHEL/dnf variant."
+
+# Locate the repo (this script lives in <repo>/deploy/).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Server address users will type in the browser.
+SERVER_IP="${SERVER_IP:-$(hostname -I | awk '{print $1}')}"
+[[ -n "$SERVER_IP" ]] || die "Could not detect server IP. Re-run with: sudo SERVER_IP=<ip> bash ..."
+log "Using SERVER_IP=$SERVER_IP   (override with SERVER_IP=... if wrong)"
+
+# ---- STEP 1: system packages -------------------------------------------------
+log "STEP 1  apt packages"
+apt-get update -y
+apt-get install -y python3.12 python3.12-venv postgresql redis-server nginx curl rsync
+apt-get install -y libmagic1t64 || apt-get install -y libmagic1
+systemctl enable --now postgresql redis-server
+
+# ---- STEP 2: swap (safety net on low-RAM servers) ---------------------------
+if [[ "$(swapon --show --noheadings | wc -l)" -eq 0 && ! -f /swapfile ]]; then
+  log "STEP 2  creating a 4G swap file (no swap detected)"
+  fallocate -l 4G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=4096
+  chmod 600 /swapfile; mkswap /swapfile; swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+else
+  log "STEP 2  swap already present — skipping"
+fi
+
+# ---- STEP 3: lay out folders + copy code ------------------------------------
+log "STEP 3  install code into $APP"
+mkdir -p "$APP" "$DATA"
+if [[ "$REPO_ROOT" != "$APP" ]]; then
+  rsync -a --delete \
+    --exclude '.git' --exclude '.env' --exclude 'venv' \
+    --exclude 'staticfiles' --exclude '__pycache__' --exclude '*.pyc' \
+    --exclude 'node_modules' --exclude 'minio-data' \
+    "$REPO_ROOT"/ "$APP"/
+fi
+
+# ---- STEP 4: python venv + deps ---------------------------------------------
+log "STEP 4  python venv + pip install"
+python3.12 -m venv "$VENV"
+"$VENV"/bin/pip install --upgrade pip
+"$VENV"/bin/pip install -r "$APP"/requirements.txt
+
+# ---- STEP 5: credentials (generated once, reused on re-run) ------------------
+log "STEP 5  credentials"
+if [[ -f "$CREDS" ]]; then
+  # shellcheck disable=SC1090
+  . "$CREDS"
+  echo "    reusing existing credentials from $CREDS"
+else
+  DB_PASS="$(gen 24)"
+  MINIO_KEY="mmftp$(gen 8)"
+  MINIO_SECRET="$(gen 32)"
+  ADMIN_PASS="$(gen 16)"
+  SECRET_KEY="$("$VENV"/bin/python -c 'import secrets;print(secrets.token_urlsafe(64))')"
+  FERNET="$("$VENV"/bin/python -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')"
+  umask 077
+  cat >"$CREDS" <<EOF
+DB_PASS='$DB_PASS'
+MINIO_KEY='$MINIO_KEY'
+MINIO_SECRET='$MINIO_SECRET'
+ADMIN_PASS='$ADMIN_PASS'
+SECRET_KEY='$SECRET_KEY'
+FERNET='$FERNET'
+EOF
+  chmod 600 "$CREDS"
+  echo "    generated and saved to $CREDS (root-only)"
+fi
+
+# ---- STEP 6: postgres db + user (detect the cluster's real port) ------------
+log "STEP 6  postgres database + user"
+PG_PORT="$(pg_lsclusters -h 2>/dev/null | awk 'NR==1{print $3}')"; PG_PORT="${PG_PORT:-5432}"
+echo "    postgres cluster is on port $PG_PORT"
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='mmftp'" | grep -q 1 \
+  || sudo -u postgres psql -c "CREATE USER mmftp WITH PASSWORD '$DB_PASS';"
+sudo -u postgres psql -c "ALTER USER mmftp WITH PASSWORD '$DB_PASS';"
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='mmftp'" | grep -q 1 \
+  || sudo -u postgres psql -c "CREATE DATABASE mmftp OWNER mmftp;"
+
+# ---- STEP 7: MinIO -----------------------------------------------------------
+log "STEP 7  MinIO binary + service + bucket"
+[[ -x /usr/local/bin/minio ]] || { curl -fL https://dl.min.io/server/minio/release/linux-amd64/minio -o /usr/local/bin/minio; chmod +x /usr/local/bin/minio; }
+[[ -x /usr/local/bin/mc    ]] || { curl -fL https://dl.min.io/client/mc/release/linux-amd64/mc       -o /usr/local/bin/mc;    chmod +x /usr/local/bin/mc; }
+cat >/etc/systemd/system/minio.service <<EOF
+[Unit]
+Description=MinIO object storage
+After=network.target
+
+[Service]
+User=root
+Environment=MINIO_ROOT_USER=$MINIO_KEY
+Environment=MINIO_ROOT_PASSWORD=$MINIO_SECRET
+ExecStart=/usr/local/bin/minio server $DATA --address 127.0.0.1:9000 --console-address 127.0.0.1:9001
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now minio
+sleep 5
+/usr/local/bin/mc alias set local http://127.0.0.1:9000 "$MINIO_KEY" "$MINIO_SECRET"
+/usr/local/bin/mc mb --ignore-existing local/mmftp-files
+
+# ---- STEP 8: .env ------------------------------------------------------------
+log "STEP 8  write $ENVF"
+umask 077
+cat >"$ENVF" <<EOF
+DJANGO_SECRET_KEY=$SECRET_KEY
+DJANGO_DEBUG=False
+DJANGO_TIME_ZONE=Asia/Kolkata
+DJANGO_LOG_LEVEL=INFO
+DJANGO_SKIP_MAKEMIGRATIONS=1
+DJANGO_ALLOWED_HOSTS=$SERVER_IP,localhost,127.0.0.1,[::1]
+CSRF_TRUSTED_ORIGINS=http://$SERVER_IP
+SECRETS_ENCRYPTION_KEY=$FERNET
+TRUSTED_PROXY_IPS=127.0.0.1,::1
+DJANGO_SECURE_SSL=False
+POSTGRES_DB=mmftp
+POSTGRES_USER=mmftp
+POSTGRES_PASSWORD=$DB_PASS
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=$PG_PORT
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
+MINIO_ENDPOINT_URL=http://127.0.0.1:9000
+MINIO_PUBLIC_ENDPOINT_URL=http://$SERVER_IP
+MINIO_BUCKET=mmftp-files
+MINIO_ACCESS_KEY=$MINIO_KEY
+MINIO_SECRET_KEY=$MINIO_SECRET
+MINIO_USE_SSL=False
+MINIO_REGION=us-east-1
+DJANGO_EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+DEFAULT_FROM_EMAIL=mmftp@mm.co.in
+EOF
+chmod 600 "$ENVF"
+
+# ---- STEP 9: migrate + collectstatic + superuser ----------------------------
+log "STEP 9  migrate + collectstatic + superuser"
+set -a; . "$ENVF"; set +a
+cd "$APP"
+"$VENV"/bin/python manage.py migrate --noinput
+"$VENV"/bin/python manage.py collectstatic --noinput
+DJANGO_SUPERUSER_USERNAME="$ADMIN_USER" \
+DJANGO_SUPERUSER_EMAIL="$ADMIN_EMAIL" \
+DJANGO_SUPERUSER_PASSWORD="$ADMIN_PASS" \
+"$VENV"/bin/python manage.py shell <<'PY'
+import os
+from django.contrib.auth import get_user_model
+from apps.accounts.models import Role, RoleSlug
+U = get_user_model()
+u, created = U.objects.get_or_create(
+    username=os.environ["DJANGO_SUPERUSER_USERNAME"],
+    defaults={"email": os.environ.get("DJANGO_SUPERUSER_EMAIL", "")},
+)
+if created:
+    u.is_staff = True
+    u.is_superuser = True
+    u.role = Role.objects.filter(slug=RoleSlug.SUPERADMIN).first()
+    u.set_password(os.environ["DJANGO_SUPERUSER_PASSWORD"])
+    u.save()
+    print("created superuser:", u.username)
+else:
+    print("superuser already exists (password unchanged):", u.username)
+PY
+
+# ---- STEP 10: nginx ----------------------------------------------------------
+log "STEP 10  nginx reverse proxy"
+cat >/etc/nginx/sites-available/mmftp <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+
+    client_max_body_size 64m;
+    proxy_read_timeout    3600s;
+    proxy_send_timeout    3600s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    location /mmftp-files/ {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_set_header Host $host;
+    }
+}
+EOF
+ln -sf /etc/nginx/sites-available/mmftp /etc/nginx/sites-enabled/mmftp
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl enable --now nginx
+systemctl reload nginx
+
+# ---- STEP 11: app services ---------------------------------------------------
+log "STEP 11  systemd services (web/worker/beat)"
+chown -R www-data:www-data "$APP" "$VENV"
+
+cat >/etc/systemd/system/mmftp-web.service <<EOF
+[Unit]
+Description=MMFileTransfer web (Gunicorn)
+After=network.target postgresql.service redis-server.service minio.service
+
+[Service]
+User=www-data
+WorkingDirectory=$APP
+EnvironmentFile=$ENVF
+ExecStart=$VENV/bin/gunicorn mmftp.wsgi:application --bind 127.0.0.1:8000 --workers 3 --threads 3 --timeout 600
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat >/etc/systemd/system/mmftp-worker.service <<EOF
+[Unit]
+Description=MMFileTransfer Celery worker
+After=network.target postgresql.service redis-server.service minio.service
+
+[Service]
+User=www-data
+WorkingDirectory=$APP
+EnvironmentFile=$ENVF
+ExecStart=$VENV/bin/celery -A mmftp worker -l info --concurrency 2
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat >/etc/systemd/system/mmftp-beat.service <<EOF
+[Unit]
+Description=MMFileTransfer Celery beat (scheduler)
+After=network.target postgresql.service redis-server.service
+
+[Service]
+User=www-data
+WorkingDirectory=$APP
+EnvironmentFile=$ENVF
+ExecStart=$VENV/bin/celery -A mmftp beat -l info
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now mmftp-web mmftp-worker mmftp-beat
+sleep 6
+
+# ---- done --------------------------------------------------------------------
+log "STATUS"
+systemctl is-active postgresql redis-server minio nginx mmftp-web mmftp-worker mmftp-beat || true
+echo
+curl -s -o /dev/null -w "  health via nginx (80): HTTP %{http_code}\n" "http://127.0.0.1/healthz" || true
+echo
+echo -e "\033[1;32m======================================================================\033[0m"
+echo -e "\033[1;32m DONE.\033[0m  Open  http://$SERVER_IP/  in a browser."
+echo "   Admin login:    $ADMIN_USER / $ADMIN_PASS"
+echo "   All secrets saved (root-only) in:  $CREDS"
+echo "   Note the admin password now, then you may delete $CREDS."
+echo -e "\033[1;32m======================================================================\033[0m"
