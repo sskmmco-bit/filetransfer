@@ -434,6 +434,9 @@ def edit(request, uuid):
                 recipient_ids.update(group.members.values_list("pk", flat=True))
             if selected_groups:
                 sf.groups.add(*selected_groups)
+            # Only the first activation (pending -> active) is a genuine "upload";
+            # re-editing an already-active file must not re-log it.
+            was_pending = sf.status == FileStatus.PENDING_METADATA
             try:
                 services.activate_file(
                     sf.pk,
@@ -452,6 +455,17 @@ def edit(request, uuid):
                     [sf], created_by=request.user,
                     require_verify=bool(form.cleaned_data.get("public_require_email_verify")),
                 )
+            if was_pending:
+                from apps.accounts.security import log_activity
+                from apps.audit.models import ActivityAction
+
+                n = len(recipient_ids)
+                msg = f"Uploaded '{sf.display_name}'"
+                if n:
+                    msg += f" and shared with {n} {'person' if n == 1 else 'people'}"
+                log_activity(request.user, ActivityAction.UPLOAD, msg,
+                             get_client_ip(request),
+                             request.META.get("HTTP_USER_AGENT", ""))
             if ajax:
                 return JsonResponse({"ok": True, "redirect": detail_url})
             return redirect("files:detail", uuid=sf.uuid)
@@ -852,6 +866,11 @@ def download(request, uuid):
     DownloadEvent.objects.create(
         stored_file=sf, user=request.user, ip_address=get_client_ip(request)
     )
+    from apps.accounts.security import log_activity
+    from apps.audit.models import ActivityAction
+
+    log_activity(request.user, ActivityAction.DOWNLOAD, f"Downloaded '{sf.display_name}'",
+                 get_client_ip(request), request.META.get("HTTP_USER_AGENT", ""))
     url = storage.presigned_get_url(sf.storage_key, download_name=sf.original_filename)
     return HttpResponseRedirect(url)
 

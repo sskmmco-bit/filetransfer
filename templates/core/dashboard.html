@@ -1,12 +1,81 @@
 {% extends "base.html" %}
+{% load file_extras %}
 {% block title %}Dashboard — MMFileTransfer{% endblock %}
 {% block content %}
+
+<style>
+  /* ---- dashboard-only widgets ---- */
+  .qa-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:22px;}
+  .qa{display:flex;align-items:center;gap:13px;padding:15px 16px;background:var(--card);
+    border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
+    cursor:pointer;color:var(--ink);font-weight:600;font-size:14px;width:100%;text-align:left;
+    transition:border-color .12s,box-shadow .12s;}
+  .qa:hover{border-color:#cfe3bf;box-shadow:0 4px 16px rgba(16,24,40,.07);text-decoration:none;color:var(--ink);}
+  .qa .qa-ic{width:42px;height:42px;border-radius:12px;background:var(--accent-soft);color:var(--accent2);
+    display:flex;align-items:center;justify-content:center;flex:none;}
+  .qa .qa-ic svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .qa small{display:block;color:var(--muted);font-weight:400;font-size:12px;margin-top:2px;}
+
+  .card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}
+  .card-head h2{margin:0;font-size:17px;}
+
+  /* recent files (compact, with type-icon chip) */
+  .df-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #f1f3f9;}
+  .df-row:first-child{border-top:0;}
+  .df-ic{width:38px;height:38px;border-radius:10px;flex:none;display:flex;align-items:center;
+    justify-content:center;font-size:10px;font-weight:700;letter-spacing:.02em;}
+  .df-ic.doc{background:#fdecec;color:#e0564a;} .df-ic.img{background:#e7f7f0;color:#0f9d6b;}
+  .df-ic.vid{background:#eef0ff;color:#4f46e5;} .df-ic.zip{background:#fef3e2;color:#d98a09;}
+  .df-ic.code{background:#e8f0fe;color:#2563eb;} .df-ic.file{background:#eef1f7;color:#64748b;}
+  .df-main{flex:1;min-width:0;}
+  .df-name{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
+  .df-name:hover{color:var(--accent2);}
+  .df-sub{color:var(--muted);font-size:12px;margin-top:1px;}
+  .df-date{color:var(--muted);font-size:12px;flex:none;}
+
+  /* activity feed */
+  .feed{display:flex;flex-direction:column;}
+  .feed-row{display:flex;gap:12px;padding:11px 0;border-top:1px solid #f1f3f9;}
+  .feed-row:first-child{border-top:0;}
+  .feed-ic{width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;
+    justify-content:center;background:var(--accent-soft);color:var(--accent2);}
+  .feed-ic.up{background:#e7f7f0;color:#0f9d6b;} .feed-ic.down{background:#eef0ff;color:#4f46e5;}
+  .feed-ic.del{background:var(--red-bg);color:var(--red);} .feed-ic.share{background:var(--accent-soft);color:var(--accent2);}
+  .feed-ic svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;}
+  .feed-main{min-width:0;}
+  .feed-msg{font-size:13.5px;color:var(--ink);font-weight:500;line-height:1.4;}
+  .feed-time{font-size:12px;color:var(--muted);margin-top:2px;}
+
+  /* active share links */
+  .sh-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid #f1f3f9;}
+  .sh-row:first-child{border-top:0;}
+  .sh-ic{width:38px;height:38px;border-radius:10px;flex:none;background:var(--accent-soft);color:var(--accent2);
+    display:flex;align-items:center;justify-content:center;}
+  .sh-ic svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;}
+  .sh-main{flex:1;min-width:0;}
+  .sh-name{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
+  .sh-name:hover{color:var(--accent2);}
+  .sh-sub{font-size:12px;color:var(--muted);margin-top:1px;}
+  .sh-dl{flex:none;text-align:right;line-height:1.1;}
+  .sh-dl b{font-size:17px;color:var(--ink);}
+  .sh-dl span{display:block;font-size:11px;color:var(--muted);margin-top:1px;}
+
+  /* getting-started onboarding (shown to brand-new users) */
+  .gs{counter-reset:gs;display:flex;flex-direction:column;gap:10px;margin-top:6px;}
+  .gs-step{display:flex;align-items:center;gap:12px;}
+  .gs-step::before{counter-increment:gs;content:counter(gs);width:28px;height:28px;flex:none;
+    border-radius:50%;background:var(--accent-soft);color:var(--accent2);font-weight:700;font-size:13px;
+    display:flex;align-items:center;justify-content:center;}
+  .gs-step span{font-size:14px;color:var(--ink);}
+</style>
 
 <div class="page-head">
   <h1>Welcome, {{ user.get_full_name|default:user.username }} 👋</h1>
   <div class="sub">Here's what's happening with your files.</div>
 </div>
 
+<!-- KPIs -->
 <div class="stat-grid">
   {% for s in stats %}
   <div class="stat">
@@ -25,51 +94,139 @@
   {% endfor %}
 </div>
 
+<!-- Quick actions -->
+<div class="qa-grid">
+  {% if can_upload %}
+  <button type="button" class="qa" data-uw-open>
+    <span class="qa-ic"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
+    <span>Upload files<small>Send a new file</small></span>
+  </button>
+  {% endif %}
+  <a href="{% url 'files:my_uploads' %}" class="qa">
+    <span class="qa-ic"><svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v9H4z"/></svg></span>
+    <span>Browse files<small>View all your uploads</small></span>
+  </a>
+  <a href="{% url 'files:share_links' %}" class="qa">
+    <span class="qa-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg></span>
+    <span>Share links<small>Manage your links</small></span>
+  </a>
+</div>
+
+<!-- Recent files + Recent activity -->
 <div class="cols">
-  <!-- Recent files -->
   <div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <h2 style="margin:0;font-size:17px;">Recent files</h2>
+    <div class="card-head">
+      <h2>Recent files</h2>
       <a href="{% url 'files:my_uploads' %}">View all ↗</a>
     </div>
     {% if recent_files %}
-    <table>
-      <tbody>
-        {% for f in recent_files %}
-        <tr>
-          <td>
-            <a href="{% url 'files:detail' uuid=f.uuid %}" style="font-weight:600;color:var(--ink);">{{ f.display_name }}</a>
-            <div class="hint">{{ f.content_type|default:"file" }}</div>
-          </td>
-          <td style="text-align:right;color:var(--muted);">{{ f.uploaded_at|date:"M j, H:i"|default:"—" }}</td>
-          <td style="text-align:right;width:90px;">
-            <span class="pill ok">● Active</span>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {% for f in recent_files %}
+    <div class="df-row">
+      <span class="df-ic {{ f.original_filename|ftype }}">{{ f.original_filename|fext }}</span>
+      <div class="df-main">
+        <a href="{% url 'files:detail' uuid=f.uuid %}" class="df-name">{{ f.display_name }}</a>
+        <div class="df-sub">{{ f.content_type|default:"file" }}</div>
+      </div>
+      <span class="df-date">{{ f.uploaded_at|date:"M j, H:i"|default:"—" }}</span>
+    </div>
+    {% endfor %}
     {% else %}
-    <p class="hint">No files yet. <a href="{% url 'files:upload' %}">Upload your first file</a>.</p>
+    <p class="hint" style="margin-bottom:0;">No files yet — let's get you started:</p>
+    <div class="gs">
+      <div class="gs-step"><span>Upload your first file</span></div>
+      <div class="gs-step"><span>Create a share link to send it</span></div>
+      <div class="gs-step"><span>Share files with teammates</span></div>
+    </div>
+    {% if can_upload %}
+    <button type="button" class="btn btn-sm" data-uw-open style="margin-top:16px;">Upload a file</button>
+    {% endif %}
     {% endif %}
   </div>
 
-  <!-- Storage breakdown -->
   <div class="card">
-    <h2 style="margin:0 0 4px;font-size:17px;">Storage breakdown</h2>
-    <div class="hint" style="margin-bottom:14px;">{{ storage_human }} across your active files</div>
+    <div class="card-head">
+      <h2>Recent activity</h2>
+      {% if is_admin %}<a href="{% url 'core:console_activity' %}">All logs ↗</a>{% endif %}
+    </div>
+    {% if activity %}
+    <div class="feed">
+      {% for a in activity %}
+      <div class="feed-row">
+        <span class="feed-ic
+          {% if a.icon == 'upload' %}up{% elif a.icon == 'download' %}down{% elif a.icon == 'trash' %}del{% else %}share{% endif %}">
+          {% if a.icon == "upload" %}<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          {% elif a.icon == "download" %}<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          {% elif a.icon == "trash" %}<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0v14a1 1 0 001 1h8a1 1 0 001-1V6"/></svg>
+          {% elif a.icon == "share" %}<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8 11l8-5M8 13l8 5"/></svg>
+          {% elif a.icon == "login" %}<svg viewBox="0 0 24 24"><path d="M15 3h4a1 1 0 011 1v16a1 1 0 01-1 1h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg>
+          {% elif a.icon == "user" %}<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3.5-6.5 7-6.5s7 2.5 7 6.5"/></svg>
+          {% elif a.icon == "gear" %}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+          {% else %}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/></svg>{% endif %}
+        </span>
+        <div class="feed-main">
+          <div class="feed-msg">{{ a.message }}</div>
+          <div class="feed-time">{{ a.when|timesince }} ago</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="hint">No activity yet. Your uploads, shares and downloads will show up here.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Active share links + Storage usage -->
+<div class="cols" style="margin-top:18px;">
+  <div class="card">
+    <div class="card-head">
+      <h2>Active share links</h2>
+      <a href="{% url 'files:share_links' %}">View all ↗</a>
+    </div>
+    {% if share_links %}
+    {% for link in share_links %}
+    <div class="sh-row">
+      <span class="sh-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg></span>
+      <div class="sh-main">
+        <a href="{% url 'files:share_link_detail' token=link.token %}" class="sh-name">{{ link.name }}</a>
+        <div class="sh-sub">{{ link.n_files }} file{{ link.n_files|pluralize }} · {{ link.access_label }}{% if link.days_remaining is not None %} · {{ link.days_remaining }}d left{% endif %}</div>
+      </div>
+      <div class="sh-dl">
+        <b>{{ link.download_count }}</b>
+        <span>download{{ link.download_count|pluralize }}</span>
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="hint">No active share links. Open any file and create a link to share it publicly.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Storage usage</h2>
+    </div>
     {% for b in breakdown %}
     <div class="bd-row">
       <span class="bd-dot" style="background:{{ b.color }};"></span>
       <span style="width:90px;">{{ b.label }}</span>
       <span class="bd-track"><span class="bd-fill" style="width:{{ b.pct }}%;background:{{ b.color }};"></span></span>
-      <span class="bd-pct">{{ b.pct }}%</span>
+      <span class="bd-pct" style="width:66px;">{{ b.human }}</span>
     </div>
     {% empty %}
     <p class="hint">No stored files yet.</p>
     {% endfor %}
 
-    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line);">
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+      {% if quota_human %}
+      <div class="hint">Used <b style="color:var(--ink);">{{ storage_human }}</b> of {{ quota_human }}</div>
+      <div class="bd-track" style="margin:9px 0 0;"><span class="bd-fill" style="width:{{ quota_pct }}%;background:var(--accent);"></span></div>
+      {% else %}
+      <div class="hint">Using <b style="color:var(--ink);">{{ storage_human }}</b> · unlimited quota</div>
+      {% endif %}
+    </div>
+
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
       <div class="hint">Files shared with you</div>
       <div style="font-size:22px;font-weight:700;">{{ assigned_count }}</div>
     </div>

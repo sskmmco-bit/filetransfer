@@ -175,6 +175,14 @@ def add_recipients(stored_file_id: int, *, recipient_ids=None, groups=None,
             new_ids.append(rid)
     if groups:
         sf.groups.add(*groups)
+    if new_ids:
+        from apps.audit.models import ActivityAction, ActivityLog
+
+        n = len(new_ids)
+        ActivityLog.objects.create(
+            actor=assigned_by, action=ActivityAction.OTHER,
+            message=f"Shared '{sf.display_name}' with {n} {'person' if n == 1 else 'people'}",
+        )
     if notify and new_ids:
         ids = list(new_ids)
         transaction.on_commit(lambda: _notify_recipients(sf.pk, ids))

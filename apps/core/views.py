@@ -78,11 +78,11 @@ def _type_bucket(content_type: str, filename: str) -> str:
 @login_required
 def dashboard(request):
     """Modern dashboard with real personal stats (§5.16)."""
-    from django.db.models import Sum
+    from django.db.models import Count, Q, Sum
     from django.utils import timezone
 
-    from apps.audit.models import DownloadEvent
-    from apps.files.models import FileAssignment, FileStatus, StoredFile
+    from apps.audit.models import ActivityLog, DownloadEvent
+    from apps.files.models import FileAssignment, FileStatus, ShareLink, StoredFile
 
     user = request.user
     owned_active = StoredFile.objects.filter(owner=user, status=FileStatus.ACTIVE)
@@ -92,19 +92,25 @@ def dashboard(request):
     storage_bytes = owned_active.aggregate(s=Sum("size"))["s"] or 0
     today = timezone.localdate()
 
+    # Live share links the user owns (active and not past their expiry date).
+    live_q = Q(expires_at__isnull=True) | Q(expires_at__gte=today)
+    live_links = ShareLink.objects.filter(created_by=user, is_active=True).filter(live_q)
+
+    quota_eff = user.quota_effective_bytes()  # None => unlimited
+
     stats = [
         {"label": "My files", "value": owned_active.count(), "icon": "file",
          "sub": f"{StoredFile.objects.filter(owner=user, status=FileStatus.PENDING_METADATA).count()} pending"},
         {"label": "Downloads today", "value": DownloadEvent.objects.filter(
             stored_file__owner=user, created_at__date=today).count(), "icon": "download",
          "sub": "of your files"},
-        {"label": "Active shares", "value": owned_active.filter(is_public=True).count(),
-         "icon": "share", "sub": "public links"},
+        {"label": "Active shares", "value": live_links.count(),
+         "icon": "share", "sub": "live share links"},
         {"label": "Storage used", "value": _human_size(storage_bytes), "icon": "drive",
-         "sub": "across active files"},
+         "sub": (f"of {_human_size(quota_eff)}" if quota_eff else "unlimited quota")},
     ]
 
-    # Storage breakdown by type (real).
+    # Storage breakdown by type (real) — with absolute size per bucket.
     buckets: dict[str, int] = {}
     for f in owned_active.values("content_type", "original_filename", "size"):
         b = _type_bucket(f["content_type"], f["original_filename"])
@@ -113,18 +119,48 @@ def dashboard(request):
                "Audio": "#f59e0b", "Archives": "#f97316"}
     total = sum(buckets.values()) or 1
     breakdown = [
-        {"label": k, "pct": round(v / total * 100), "color": palette.get(k, "#94a3b8")}
+        {"label": k, "human": _human_size(v), "pct": round(v / total * 100),
+         "color": palette.get(k, "#94a3b8")}
         for k, v in sorted(buckets.items(), key=lambda kv: -kv[1])
     ]
 
     recent = owned_active.order_by("-uploaded_at")[:6]
 
+    # Recent activity feed — the user's own *file* actions only (uploads,
+    # downloads, shares). Auth events (login/logout) and trash/purge management
+    # are audit-trail data that belongs in the admin console, not on a regular
+    # user's "what's happening with your files" dashboard.
+    from apps.audit.models import ActivityAction
+
+    feed_actions = [ActivityAction.UPLOAD, ActivityAction.DOWNLOAD, ActivityAction.OTHER]
+    icon_for = {
+        ActivityAction.UPLOAD: "upload", ActivityAction.DOWNLOAD: "download",
+        ActivityAction.OTHER: "share",
+    }
+    activity = [
+        {"icon": icon_for.get(a.action, "dot"), "action": a.action,
+         "message": a.message or a.get_action_display(), "when": a.created_at}
+        for a in ActivityLog.objects.filter(actor=user, action__in=feed_actions)
+        .order_by("-created_at")[:6]
+    ]
+
+    # Active share links — newest live links, with their running download counts.
+    share_links = list(
+        live_links.annotate(n_files=Count("link_files", distinct=True))
+        .order_by("-created_at")[:5]
+    )
+
     context = {
         "stats": stats,
         "breakdown": breakdown,
         "storage_human": _human_size(storage_bytes),
+        "quota_human": _human_size(quota_eff) if quota_eff else None,
+        "quota_pct": user.quota_pct(),
         "recent_files": recent,
+        "activity": activity,
+        "share_links": share_links,
         "assigned_count": assigned.count(),
+        "can_upload": user.has_perm_code("files.upload"),
         "is_admin": user.has_perm_code("audit.view"),
     }
     return render(request, "core/dashboard.html", context)

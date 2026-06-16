@@ -64,6 +64,14 @@ def create_link(files, *, created_by, name: str = "", require_verify: bool = Fal
         [ShareLinkFile(share_link=link, stored_file=f) for f in files]
     )
     sync_file_public_flags(files)
+
+    from apps.audit.models import ActivityAction, ActivityLog
+
+    n = len(files)
+    ActivityLog.objects.create(
+        actor=created_by, action=ActivityAction.OTHER,
+        message=f"Created share link '{link.name}' over {n} file{'s' if n != 1 else ''}",
+    )
     return link
 
 
