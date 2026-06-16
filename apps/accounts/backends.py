@@ -141,57 +141,9 @@ class MultiIdentifierBackend(ModelBackend):
         return mapped
 
     def _provision_or_sync(self, s, identifier: str, attrs: dict):
-        from apps.accounts.models import AuthSource, Role, RoleSlug
-        from apps.audit.models import ActivityAction, ActivityLog
+        # Shared with the bulk `sync_ldap_users` command so JIT login and bulk
+        # import provision users identically (Uploader role, default quota).
+        from apps.accounts.ldap_provision import provision_or_sync_ldap_user
 
-        email = attrs["email"]
-        employee_id = attrs["employee_id"] or None
-
-        # Already provisioned from LDAP before? Sync and return.
-        existing_ldap = UserModel.objects.filter(
-            username__iexact=identifier, auth_source=AuthSource.LDAP
-        ).first()
-        if existing_ldap:
-            existing_ldap.email = email
-            if employee_id:
-                existing_ldap.employee_id = employee_id
-            existing_ldap.first_name = attrs["first_name"]
-            existing_ldap.last_name = attrs["last_name"]
-            existing_ldap.save(update_fields=["email", "employee_id", "first_name", "last_name"])
-            return existing_ldap
-
-        # Collision with a local row by email or employee_id => NO JIT (local wins).
-        collision = Q(email__iexact=email)
-        if employee_id:
-            collision |= Q(employee_id__iexact=employee_id)
-        collision |= Q(username__iexact=identifier)
-        if UserModel.objects.filter(collision).exists():
-            logger.info("LDAP JIT for %r blocked: attributes collide with a local row", identifier)
-            return None
-
-        # Genuine first login — provision with the Uploader role.
-        role = Role.objects.filter(slug=RoleSlug.UPLOADER).first()
-        user = UserModel(
-            username=identifier,
-            email=email,
-            employee_id=employee_id,
-            first_name=attrs["first_name"],
-            last_name=attrs["last_name"],
-            auth_source=AuthSource.LDAP,
-            role=role,
-            is_active=True,
-        )
-        user.set_unusable_password()  # LDAP users never have a local password
-        user.save()
-        ActivityLog.objects.create(
-            actor=user,
-            action=ActivityAction.USER_CREATED,
-            message=f"JIT-provisioned from LDAP as Uploader ({email})",
-        )
-        try:
-            from apps.notifications.tasks import enqueue_welcome_email
-
-            enqueue_welcome_email(user)
-        except Exception:  # noqa: BLE001 — welcome mail is best-effort
-            pass
+        user, _created = provision_or_sync_ldap_user(s, identifier, attrs)
         return user
