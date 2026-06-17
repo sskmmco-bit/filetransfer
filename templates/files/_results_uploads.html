@@ -78,6 +78,8 @@ delegated in my_uploads.html; star toggle + confirmAction are global).{% endcomm
   <div class="fempty">
     <div class="big">📂</div>
     <p>You haven't uploaded any files yet.</p>
+    {% if can_upload %}
     <button type="button" class="btn" data-uw-open style="margin-top:6px;">Upload your first file</button>
+    {% endif %}
   </div>
 {% endif %}

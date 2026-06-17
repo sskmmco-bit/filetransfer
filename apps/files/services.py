@@ -1,16 +1,4 @@
-"""Files domain services (§5.5, §5.6.1, §5.8).
 
-Two clearly separated steps:
-
-  complete_transfer()  — bytes are written and validated (full-file SHA-256 +
-                         magic-byte content sniff + policy checks). Moves the
-                         file to `pending_metadata`. Never touches the final key.
-  activate_file()      — metadata is saved and the file goes live: copy temp ->
-                         final key, set uploaded_at, create FileAssignment rows,
-                         enqueue Celery tasks, delete the temp object/session.
-                         Row-locked and idempotent: a retried request never
-                         double-copies objects or double-sends mail.
-"""
 from __future__ import annotations
 
 import hashlib
@@ -219,13 +207,7 @@ def _enqueue_post_activation(stored_file_id: int, *, notify: bool = True) -> Non
 
 @transaction.atomic
 def reserve_download_slot(stored_file_id: int) -> StoredFile | None:
-    """Atomically reserve one download slot under a row lock (§5.10).
-
-    Returns the refreshed StoredFile if a slot was reserved, or None if the file
-    is unavailable (not active, expired, or the download limit is reached). The
-    check-and-increment is a single locked transaction so concurrent visitors
-    can never over-draw the last slot.
-    """
+    
     sf = StoredFile.objects.select_for_update().get(pk=stored_file_id)
     if sf.status != FileStatus.ACTIVE or sf.is_expired:
         return None
@@ -238,18 +220,13 @@ def reserve_download_slot(stored_file_id: int) -> StoredFile | None:
 
 @transaction.atomic
 def soft_delete_stored_file(stored_file_id: int, *, reason: str = "", actor=None) -> StoredFile:
-    """Move an active file to Trash (§5.6.2): the row AND the stored object are
-    KEPT so the file can be restored; only public sharing is withdrawn. Permanent
-    removal of the object happens later via ``purge_stored_file``. Idempotent."""
+
     from apps.audit.models import ActivityAction, ActivityLog
 
     sf = StoredFile.objects.select_for_update().get(pk=stored_file_id)
     if sf.status in (FileStatus.TRASHED, FileStatus.DELETED):
         return sf
 
-    # Drafts / in-flight uploads (PENDING_METADATA, UPLOADING) were never shared
-    # and have no final stored object — restoring one to ACTIVE would be broken,
-    # so discard them outright instead of parking them in the recoverable trash.
     if sf.status != FileStatus.ACTIVE:
         for key in (sf.temp_key, sf.storage_key, sf.thumbnail_key):
             if key:

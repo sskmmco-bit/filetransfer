@@ -22,6 +22,7 @@ class RoleSlug(models.TextChoices):
     SUPERADMIN = "superadmin", "SuperAdmin"
     ADMIN = "admin", "Admin"
     UPLOADER = "uploader", "Uploader"
+    DOWNLOADER = "downloader", "Downloader"
 
 
 class Permission(models.Model):

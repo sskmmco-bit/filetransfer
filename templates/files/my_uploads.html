@@ -8,10 +8,12 @@
     <h1 style="margin-bottom:2px;">My Files</h1>
     <div class="sub">Files you've uploaded · {{ page.paginator.count }} total</div>
   </div>
+  {% if can_upload %}
   <button type="button" class="btn-upload" style="max-width:200px;" data-uw-open>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
     Upload Files
   </button>
+  {% endif %}
 </div>
 
 <div style="margin-top:18px;" data-filelist data-view="{{ view }}" data-per="{{ page.paginator.per_page }}" data-total="{{ page.paginator.count }}">

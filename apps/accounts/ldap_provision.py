@@ -8,7 +8,7 @@ pure DB operation and is safe to import everywhere.
 
 Resolution rules mirror §5.7.1a: an LDAP entry that collides with a local
 (non-LDAP) row is skipped — local accounts always win. New accounts are created
-active, with the Uploader role, an unusable local password, and `quota_bytes`
+active, with the Downloader role, an unusable local password, and `quota_bytes`
 left NULL so they inherit the site default quota (§quota).
 """
 from __future__ import annotations
@@ -67,8 +67,9 @@ def provision_or_sync_ldap_user(settings_obj, identifier: str, attrs: dict):
         )
         return None, False
 
-    # Genuine first sight of this user — provision with the Uploader role.
-    role = Role.objects.filter(slug=RoleSlug.UPLOADER).first()
+    # Genuine first sight of this user — provision with the Downloader role
+    # (download-only by default; an admin can elevate to Uploader later).
+    role = Role.objects.filter(slug=RoleSlug.DOWNLOADER).first()
     user = UserModel(
         username=identifier,
         email=email,
@@ -84,7 +85,7 @@ def provision_or_sync_ldap_user(settings_obj, identifier: str, attrs: dict):
     ActivityLog.objects.create(
         actor=user,
         action=ActivityAction.USER_CREATED,
-        message=f"Provisioned from LDAP as Uploader ({email})",
+        message=f"Provisioned from LDAP as Downloader ({email})",
     )
     try:
         from apps.notifications.tasks import enqueue_welcome_email
