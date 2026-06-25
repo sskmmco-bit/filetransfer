@@ -283,7 +283,14 @@
       download_limit:(wantLimit?(document.getElementById('bsLimit').value||null):null) };
     btn.disabled=true; btn.textContent='Sharing…';
     try{
-      var r=await fetch("{% url 'files:bulk_share' %}",{method:'POST',headers:{'X-CSRFToken':csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      var token=window.CSRF||csrf||'';
+      var r=await fetch("{% url 'files:bulk_share' %}",{method:'POST',headers:{'X-CSRFToken':token,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      if(!r.ok){
+        btn.disabled=false; btn.textContent='Share';
+        var e1=document.getElementById('bsErr');
+        e1.textContent=(r.status===403)?'Your session expired or the page is stale. Please refresh and try again.':'Share failed (HTTP '+r.status+'). Please try again.';
+        e1.hidden=false; return;
+      }
       var d=await r.json();
       btn.disabled=false; btn.textContent='Share';
       var err=document.getElementById('bsErr');

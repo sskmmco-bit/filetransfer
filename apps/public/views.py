@@ -22,8 +22,8 @@ and still be denied if a file's limit was reached in the meantime (§6).
 from __future__ import annotations
 
 import secrets
+from functools import wraps
 
-from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -40,11 +40,33 @@ CODE_EXPIRY_MINUTES = 15
 MAX_CODE_ATTEMPTS = 5
 
 
+class LinkUnavailable(Exception):
+    """A share link that is missing, disabled, expired, or has no active files.
+
+    Raised by the link helpers and turned into a friendly ``public/unavailable``
+    page (HTTP 404) by the ``@public_link_view`` decorator — so external
+    recipients never see Django's raw debug/404 page.
+    """
+
+
+def public_link_view(view):
+    """Render the branded "link unavailable" page on :class:`LinkUnavailable`."""
+
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        try:
+            return view(request, *args, **kwargs)
+        except LinkUnavailable:
+            return render(request, "public/unavailable.html", status=404)
+
+    return wrapped
+
+
 def _link(token: str) -> ShareLink:
-    """The live share link for this token (404 if missing/disabled/expired)."""
+    """The live share link for this token (unavailable if missing/disabled/expired)."""
     link = ShareLink.objects.filter(token=token, is_active=True).first()
     if link is None or not link.is_live:
-        raise Http404("This link is invalid or has expired.")
+        raise LinkUnavailable("This link is invalid or has expired.")
     return link
 
 
@@ -52,7 +74,7 @@ def _link_files(link: ShareLink):
     """Active files covered by the link, oldest first."""
     qs = link.files.filter(status=FileStatus.ACTIVE).order_by("created_at")
     if not qs.exists():
-        raise Http404("This link is invalid or has expired.")
+        raise LinkUnavailable("This link is invalid or has expired.")
     return qs
 
 
@@ -109,6 +131,7 @@ def _landing_ctx(request, link, files, **extra):
 
 # ---------------------------------------------------------------------------
 @require_http_methods(["GET"])
+@public_link_view
 def landing(request, token):
     link = _link(token)
     files = list(_link_files(link))
@@ -125,6 +148,7 @@ def landing(request, token):
 
 
 @require_http_methods(["POST"])
+@public_link_view
 def submit_password(request, token):
     from django.contrib.auth.hashers import check_password
     from django.utils import timezone
@@ -145,6 +169,7 @@ def submit_password(request, token):
 
 
 @require_http_methods(["POST"])
+@public_link_view
 def request_code(request, token):
     link = _link(token)
     files = list(_link_files(link))
@@ -180,6 +205,7 @@ def request_code(request, token):
 
 
 @require_http_methods(["POST"])
+@public_link_view
 def verify_code(request, token):
     from django.utils import timezone
 
@@ -216,6 +242,7 @@ def verify_code(request, token):
 
 
 @require_http_methods(["GET"])
+@public_link_view
 def preview(request, token, uuid):
     """Inline preview of a link file (no download slot consumed).
 
@@ -232,6 +259,7 @@ def preview(request, token, uuid):
 
 
 @require_http_methods(["GET"])
+@public_link_view
 def download(request, token, uuid):
     """Download a single file via the link (counts toward the link's limit)."""
     link = _link(token)
@@ -256,6 +284,7 @@ def download(request, token, uuid):
 
 
 @require_http_methods(["GET"])
+@public_link_view
 def download_all(request, token):
     """Stream every file in the link as a ZIP (each counts toward the limit)."""
     import zipfile

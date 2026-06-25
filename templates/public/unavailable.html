@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Link unavailable — MMFileTransfer{% endblock %}
+{% block content %}
+
+<style>
+  .lu-wrap{max-width:480px;margin:48px auto 0;text-align:center;}
+  .lu-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:36px 28px;
+    box-shadow:0 1px 3px rgba(16,24,40,.05),0 12px 24px rgba(16,24,40,.05);}
+  .lu-ic{width:64px;height:64px;border-radius:16px;margin:0 auto 18px;display:flex;align-items:center;justify-content:center;
+    background:#fff4f4;color:#d64545;}
+  .lu-ic svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+  .lu-card h1{margin:0 0 8px;font-size:20px;}
+  .lu-card p{margin:0;color:var(--muted);font-size:14px;line-height:1.55;}
+  .lu-hint{margin-top:16px !important;font-size:13px;}
+</style>
+
+<div class="lu-wrap">
+  <div class="lu-card">
+    <div class="lu-ic">
+      <svg viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+    </div>
+    <h1>This link is no longer available</h1>
+    <p>It may have expired, been disabled by the sender, or the files were removed.</p>
+    <p class="lu-hint">Please ask the sender to share the files with you again.</p>
+  </div>
+</div>
+
+{% endblock %}
