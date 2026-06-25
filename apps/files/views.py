@@ -335,8 +335,18 @@ def upload_finalize(request):
     download_limit = int(data["download_limit"]) if data.get("download_limit") else None
     notify = bool(data.get("notify", True))
 
-    # Recipients are OPTIONAL: with no destination the file simply lands in the
-    # owner's My Files (Private) and can be shared later.
+    # "Specific users & groups" is an explicit intent to SHARE — reject an empty
+    # recipient list rather than silently saving Private (mirrors the frontend
+    # guard, so a direct API call can't reproduce the silent-private behavior).
+    # The Private option (no access_mode/"private") still saves with no recipients.
+    if data.get("access_mode") == "users" and not make_public \
+            and not recipient_ids and not recipient_groups:
+        return JsonResponse(
+            {"error": "Add at least one recipient, or choose Private."}, status=400
+        )
+
+    # Recipients are otherwise OPTIONAL: with no destination the file simply lands
+    # in the owner's My Files (Private) and can be shared later.
 
     for sf in files:
         sf.title = sf.title or sf.original_filename

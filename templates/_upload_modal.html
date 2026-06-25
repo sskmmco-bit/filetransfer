@@ -127,6 +127,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
   .uw-link .mini{padding:8px 12px;border-radius:9px;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--accent2);cursor:pointer;white-space:nowrap;}
   .uw-link .mini:hover{background:#f0f1ff;}
   .uw-access-users{margin-top:12px;}
+  .uw-req{color:#e0564a;font-weight:600;}
   .uw-access-users[hidden],.uw-access-public[hidden],.uw-access-private[hidden]{display:none;}
   /* resume incomplete uploads banner */
   .uw-resume{border:1px solid #f6dca4;background:#fffaf0;border-radius:12px;padding:12px 14px;margin-bottom:14px;}
@@ -274,7 +275,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
             <div class="uw-pick-list" id="uwPickList" hidden></div>
           </div>
           <div class="uw-chips" id="uwChips"></div>
-          <div class="hint" style="margin-top:8px;">Add at least one recipient or group, or switch to <b>Public link</b> above.</div>
+          <div class="hint" id="uwUsersHint" style="margin-top:8px;">Add at least one recipient or group, or switch to <b>Public link</b> above.</div>
         </div>
 
         {# data source for the picker (kept hidden) #}
@@ -397,6 +398,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
   let jobs = [];               // latest worker snapshot: [{id,name,size,status,sent,uuid,error}]
   const recipients = [];
   let step = 1;
+  let sending = false;         // true while a finalize request is in flight
 
   function newId(){ try{ return crypto.randomUUID(); }catch(e){ return 'j'+Date.now()+'-'+Math.round(Math.random()*1e9); } }
   function human(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB';
@@ -485,7 +487,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
   function close(){ m.hidden=true; }
   // Reset only the metadata FORM + step — never the jobs (they run in the worker).
   function reset(){
-    recipients.length=0; step=1;
+    recipients.length=0; step=1; sending=false;
     $('uwChips').innerHTML=''; $('uwInput').value='';
     $('uwDesc').value=''; $('uwMsg').value='';
     const usersRadio = m.querySelector('input[name="uwAccess"][value="users"]');
@@ -662,12 +664,18 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     });
     updateSendLabel();
   }
-  // Button reflects whether the file is actually being shared.
+  // "Specific users & groups" is an explicit share intent — it requires at least
+  // one recipient. (Private saves with none; Public link needs no named people.)
+  function sendBlocked(){ return getAccessMode() === 'users' && recipients.length === 0; }
+  // Button reflects whether the file is actually being shared, and is disabled
+  // until a "users" share has at least one recipient.
   function updateSendLabel(){
-    if($('uwSend').disabled) return;
+    if(sending) return;                                  // mid-send: leave "Saving…"
     const mode = getAccessMode();
-    const shared = mode === 'public' || (mode === 'users' && recipients.length);
-    $('uwSend').textContent = shared ? 'Send Files ✓' : 'Save to My Files';
+    $('uwSend').textContent = mode === 'private' ? 'Save to My Files' : 'Send Files ✓';
+    $('uwSend').disabled = sendBlocked();
+    const hint = $('uwUsersHint');
+    if(hint) hint.classList.toggle('uw-req', sendBlocked());
   }
   function renderPickList(){
     var list=$('uwPickList'), q=$('uwPickSearch').value.trim().toLowerCase();
@@ -746,8 +754,10 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     $('uwErr').hidden=true;
     const uuids = jobs.filter(j=>j.status==='done').map(j=>j.uuid);
     if(!uuids.length){ showErr('No uploaded files to send.'); return; }
-    // Recipients are optional — no destination just saves to My Files.
-    $('uwSend').disabled=true; $('uwSend').textContent='Saving…';
+    // "Specific users & groups" must have at least one recipient — otherwise use
+    // the Private option to save to My Files.
+    if(sendBlocked()){ showErr('Add at least one recipient, or choose Private above.'); return; }
+    sending=true; $('uwSend').disabled=true; $('uwSend').textContent='Saving…';
     // Expiry: a preset (days), a custom date, or none ("Keep forever").
     const exSel = $('uwExpirySel').value;
     const mode = getAccessMode();
@@ -771,6 +781,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       expiry_days: expiryDays,
       notify:$('uwNotify').checked,
       recipients: mode === 'users' ? recipients.map(r=>r.val) : [],
+      access_mode: mode,
       make_public:pub,
       access:(pub ? (verify ? 'tracked' : 'public') : 'public'),
       public_email_verify:verify,
@@ -782,7 +793,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
     try{
       const r = await fetch(U.finalize,{method:'POST',headers:{'X-CSRFToken':U.csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const d = await readJson(r);
-      if(!d.ok){ showErr(d.error||'Failed to send.'); $('uwSend').disabled=false; updateSendLabel(); return; }
+      if(!d.ok){ showErr(d.error||'Failed to send.'); sending=false; updateSendLabel(); return; }
       const links = d.public_links||[];
       const n = d.activated;
       const sharedWithPeople = mode === 'users' && recipients.length > 0;
@@ -828,7 +839,7 @@ this page, so we warn before a navigation would interrupt an in-flight upload.
       }));
       engine.clearDone();                              // consumed — drop them from the worker
       $('uwSend').hidden=true; $('uwStatus').textContent=''; goStep('done');
-    }catch(err){ showErr('Error: '+err); $('uwSend').disabled=false; updateSendLabel(); }
+    }catch(err){ showErr('Error: '+err); sending=false; updateSendLabel(); }
   });
 
   // ---- minimize / restore (Dropbox-style background uploads) ----
