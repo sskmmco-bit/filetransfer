@@ -2,9 +2,9 @@
 # =============================================================================
 # MMFileTransfer — one-command installer (no Docker, Ubuntu/Debian)
 # -----------------------------------------------------------------------------
-# Installs and starts the whole stack (PostgreSQL, Redis, MinIO, Gunicorn,
-# Celery worker + beat, nginx) on a clean Linux server. Needs internet ONLY
-# while running; the app runs fully offline afterward.
+# Installs and starts the whole stack (PostgreSQL, Redis, MinIO, Gunicorn, nginx,
+# and the background-job systemd timers) on a clean Linux server. Needs internet
+# ONLY while running; the app runs fully offline afterward.
 #
 # USAGE — copy the repo to the server, then run ONE command from the repo root:
 #
@@ -248,7 +248,7 @@ systemctl enable --now nginx
 systemctl reload nginx
 
 # ---- STEP 11: app services ---------------------------------------------------
-log "STEP 11  systemd services (web/worker/beat)"
+log "STEP 11  systemd services (web + job timers)"
 chown -R www-data:www-data "$APP" "$VENV"
 
 cat >/etc/systemd/system/mmftp-web.service <<EOF
@@ -268,47 +268,82 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-cat >/etc/systemd/system/mmftp-worker.service <<EOF
+# Background jobs run as oneshot management commands on timers (no Celery worker/beat).
+# A shared OnFailure helper tags failures into the journal (logger -t mmftp-job).
+cat >/etc/systemd/system/mmftp-onfailure@.service <<'EOF'
 [Unit]
-Description=MMFileTransfer Celery worker
-After=network.target postgresql.service redis-server.service minio.service
+Description=Log failure of %i
 
 [Service]
-User=www-data
-WorkingDirectory=$APP
-EnvironmentFile=$ENVF
-ExecStart=$VENV/bin/celery -A mmftp worker -l info --concurrency 2
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
+Type=oneshot
+ExecStart=/usr/bin/logger -t mmftp-job "unit %i failed"
 EOF
 
-cat >/etc/systemd/system/mmftp-beat.service <<EOF
+mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
+  cat >/etc/systemd/system/$1.service <<EOF
 [Unit]
-Description=MMFileTransfer Celery beat (scheduler)
-After=network.target postgresql.service redis-server.service
+Description=$2
+After=network.target postgresql.service redis-server.service minio.service
+OnFailure=mmftp-onfailure@%n.service
 
 [Service]
+Type=oneshot
 User=www-data
 WorkingDirectory=$APP
 EnvironmentFile=$ENVF
-ExecStart=$VENV/bin/celery -A mmftp beat -l info
-Restart=always
-RestartSec=3
+ExecStart=$VENV/bin/python $APP/manage.py $3
+EOF
+}
+
+mk_job mmftp-notifications "MMFileTransfer deferred-email drain"  "send_queued_notifications"
+mk_job mmftp-purge         "MMFileTransfer daily purge/expiry"    "purge_expired_files"
+mk_job mmftp-reminders     "MMFileTransfer daily expiry reminders" "send_expiry_reminders"
+
+cat >/etc/systemd/system/mmftp-notifications.timer <<'EOF'
+[Unit]
+Description=Drain the deferred-email queue every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=timers.target
+EOF
+
+cat >/etc/systemd/system/mmftp-purge.timer <<'EOF'
+[Unit]
+Description=Daily file purge / expiry cleanup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+cat >/etc/systemd/system/mmftp-reminders.timer <<'EOF'
+[Unit]
+Description=Daily expiry-reminder emails
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now mmftp-web mmftp-worker mmftp-beat
+systemctl enable --now mmftp-web mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer
 sleep 6
 
 # ---- done --------------------------------------------------------------------
 log "STATUS"
-systemctl is-active postgresql redis-server minio nginx mmftp-web mmftp-worker mmftp-beat || true
+systemctl is-active postgresql redis-server minio nginx mmftp-web || true
+systemctl list-timers 'mmftp-*' --no-pager || true
 echo
 curl -s -o /dev/null -w "  health via nginx (80): HTTP %{http_code}\n" "http://127.0.0.1/healthz" || true
 echo

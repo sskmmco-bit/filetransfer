@@ -3,7 +3,7 @@
 Phase 1 ships three tables:
   - ActivityLog  : durable record of meaningful user/system actions.
   - LoginAttempt : every authentication attempt; feeds the login throttle.
-  - CronLog      : per-run summary of scheduled Celery tasks (e.g. purge).
+  - CronLog      : per-run summary of scheduled jobs / management commands (e.g. purge).
 
 DownloadEvent (§5.10) is added in Phase 3 alongside the download flow.
 All records capture the real client IP via apps.core.utils.get_client_ip().

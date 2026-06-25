@@ -24,11 +24,12 @@ talk to each other over `localhost`:
 | Service | Role | Runs as |
 |---|---|---|
 | PostgreSQL | database (users, file metadata, audit) | OS service |
-| Redis | Celery broker + Django cache | OS service |
+| Redis | Django cache | OS service |
 | MinIO | file storage (files live in a folder on this disk) | systemd service |
 | Gunicorn | the Django web app | `mmftp-web.service` |
-| Celery worker | background jobs (email, file activation, cleanup) | `mmftp-worker.service` |
-| Celery beat | scheduler (daily expiry/retention) | `mmftp-beat.service` |
+| Deferred-email drain | sends queued emails (~every 2 min) | `mmftp-notifications.timer` |
+| Daily purge | expiry/retention + abandoned-upload cleanup | `mmftp-purge.timer` |
+| Daily reminders | expiry-reminder emails | `mmftp-reminders.timer` |
 | nginx | reverse proxy + serves downloads | OS service |
 
 > **MinIO stores files in a plain local folder on this server.** It is not a
@@ -279,10 +280,11 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## STEP 9 — The three app services (systemd)
+## STEP 9 — The web service + background-job timers (systemd)
 
-These keep the web app, worker, and scheduler running. WhiteNoise serves static
-files, so Gunicorn alone is enough behind nginx.
+One always-on web service plus three **oneshot** jobs fired by **systemd timers**
+(no Celery worker/broker). WhiteNoise serves static files, so Gunicorn alone is
+enough behind nginx.
 
 `/etc/systemd/system/mmftp-web.service`:
 ```ini
@@ -303,51 +305,63 @@ RestartSec=3
 WantedBy=multi-user.target
 ```
 
-`/etc/systemd/system/mmftp-worker.service`:
+A shared failure logger (tags any failed job into the journal as `mmftp-job`):
 ```ini
+# /etc/systemd/system/mmftp-onfailure@.service
 [Unit]
-Description=MMFileTransfer Celery worker
-After=network.target postgresql.service redis.service minio.service
+Description=Log failure of %i
 
 [Service]
-User=www-data
-WorkingDirectory=/opt/mmftp/app
-EnvironmentFile=/opt/mmftp/.env
-ExecStart=/opt/mmftp/venv/bin/celery -A mmftp worker -l info
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
+Type=oneshot
+ExecStart=/usr/bin/logger -t mmftp-job "unit %i failed"
 ```
 
-`/etc/systemd/system/mmftp-beat.service`:
+Each job is a `Type=oneshot` service — e.g. the deferred-email drain
+`/etc/systemd/system/mmftp-notifications.service`:
 ```ini
 [Unit]
-Description=MMFileTransfer Celery beat (scheduler)
-After=network.target postgresql.service redis.service
+Description=MMFileTransfer deferred-email drain
+After=network.target postgresql.service redis.service minio.service
+OnFailure=mmftp-onfailure@%n.service
 
 [Service]
+Type=oneshot
 User=www-data
 WorkingDirectory=/opt/mmftp/app
 EnvironmentFile=/opt/mmftp/.env
-ExecStart=/opt/mmftp/venv/bin/celery -A mmftp beat -l info
-Restart=always
-RestartSec=3
+ExecStart=/opt/mmftp/venv/bin/python /opt/mmftp/app/manage.py send_queued_notifications
+```
 
+…with `mmftp-purge.service` (`… manage.py purge_expired_files`) and
+`mmftp-reminders.service` (`… manage.py send_expiry_reminders`) following the same
+shape. Each has a matching `.timer`:
+```ini
+# /etc/systemd/system/mmftp-notifications.timer — every 2 minutes
+[Unit]
+Description=Drain the deferred-email queue every 2 minutes
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
 [Install]
-WantedBy=multi-user.target
+WantedBy=timers.target
+
+# /etc/systemd/system/mmftp-purge.timer — daily 03:00   -> OnCalendar=*-*-* 03:00:00
+# /etc/systemd/system/mmftp-reminders.timer — daily 07:00 -> OnCalendar=*-*-* 07:00:00
 ```
 
 > The `www-data` user must be able to read `/opt/mmftp`. After Step 7 run:
 > `sudo chown -R www-data:www-data /opt/mmftp` (or use your own service user
-> consistently in all three units).
+> consistently in all units).
 
-Start them all:
+Start the web service and enable the **timers** (not the job services):
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now mmftp-web mmftp-worker mmftp-beat
+sudo systemctl enable --now mmftp-web \
+     mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer
 ```
+
+(The one-command installer `install_no_docker.sh` writes all of these for you.)
 
 ### Tuning concurrency — how many users at once
 
@@ -380,24 +394,29 @@ sudo systemctl daemon-reload
 sudo systemctl restart mmftp-web
 ```
 
-The **Celery worker** has its own separate concurrency for background jobs
-(email, thumbnails, cleanup) — raise it with `--concurrency N` on the
-`mmftp-worker.service` ExecStart line if those ever back up.
+Background jobs no longer run on a worker: deferred email is drained by the
+`mmftp-notifications.timer` (every 2 min) and cleanup/reminders by daily timers.
+If the email queue ever backs up, shorten the timer interval
+(`OnUnitActiveSec=`) or raise the per-run batch (`--limit`) on the drain command.
+Thumbnails are generated inline on activation (no job).
 
 ---
 
 ## STEP 10 — Verify
 
 ```bash
-# All services running?
-systemctl status postgresql redis nginx minio mmftp-web mmftp-worker mmftp-beat
+# Web + infra running?
+systemctl status postgresql redis nginx minio mmftp-web
+
+# Background-job timers scheduled? (shows NEXT/LAST run per timer)
+systemctl list-timers 'mmftp-*' --no-pager
 
 # Health probe (DB + Redis):
 curl -s http://127.0.0.1:8000/healthz
 
 # Logs if something is wrong:
 journalctl -u mmftp-web -n 80 --no-pager
-journalctl -u mmftp-worker -n 80 --no-pager
+journalctl -u mmftp-notifications -n 80 --no-pager   # last drain run
 ```
 
 Then open `http://<server-ip>/` in a browser, log in with the admin account from
@@ -411,8 +430,12 @@ fully offline.**
 ## Day-to-day operations
 
 ```bash
-# Restart after a code change (worker/beat have NO autoreload — always restart):
-sudo systemctl restart mmftp-web mmftp-worker mmftp-beat
+# Restart the web app after a code change (the job timers re-exec manage.py
+# each run, so they pick up new code automatically — no restart needed):
+sudo systemctl restart mmftp-web
+
+# Run a background job by hand (e.g. to test it now instead of waiting for the timer):
+sudo systemctl start mmftp-notifications.service   # or mmftp-purge / mmftp-reminders
 
 # Tail logs:
 journalctl -u mmftp-web -f
@@ -431,9 +454,13 @@ git pull                                   # or copy new code in
 set -a; source /opt/mmftp/.env; set +a
 /opt/mmftp/venv/bin/python manage.py migrate
 /opt/mmftp/venv/bin/python manage.py collectstatic --noinput
-sudo systemctl restart mmftp-web mmftp-worker mmftp-beat
+sudo systemctl restart mmftp-web      # timers pick up new code on their next run
 ```
 
+> `deploy/update_no_docker.sh` automates this and also retires the legacy Celery
+> `mmftp-worker`/`mmftp-beat` units and installs the job timers if they aren't
+> present yet.
+>
 > If the server is offline by update time, updating Python packages will need
 > internet again (or a one-off `pip download` bundle). Code-only changes that
 > don't add new packages update fine offline.
@@ -452,7 +479,8 @@ sudo systemctl restart mmftp-web mmftp-worker mmftp-beat
 | Postgres "connection refused" on 5432, but `postgresql` shows active | The cluster is on a non-default port. Run `pg_lsclusters` — if it shows `5433`, another service held 5432 at install time. Fix: `sudo sed -i 's/^port = 5433/port = 5432/' /etc/postgresql/16/main/postgresql.conf && sudo systemctl restart postgresql@16-main`. (The umbrella `postgresql.service` reports "active" even when the cluster isn't serving — check `postgresql@16-main`.) |
 | Any service won't start: "Address already in use" | Another program owns that port (6379/9000/5432/80). Find it: `sudo ss -ltnp \| grep :PORT`. Stop the conflicting service before starting ours. On a clean dedicated server this won't happen. |
 | App can't reach MinIO | MinIO keys in `.env` must match the `minio.service` file. `systemctl status minio`. |
-| Scheduled cleanup/expiry not running | `systemctl status mmftp-beat mmftp-worker` — both must be running. |
+| Scheduled cleanup/expiry not running | `systemctl list-timers 'mmftp-*'` — timers must be active with a future NEXT. Inspect the last run: `journalctl -u mmftp-purge` (or `-reminders` / `-notifications`); failures are also tagged `mmftp-job` in the journal. |
+| Queued emails not sending | `systemctl list-timers mmftp-notifications.timer`; run it now with `sudo systemctl start mmftp-notifications.service` and check `journalctl -u mmftp-notifications`. A misconfigured `.env`/venv shows up as an ExecStart error there. |
 
 ---
 
@@ -463,4 +491,4 @@ sudo systemctl restart mmftp-web mmftp-worker mmftp-beat
 3. In `.env`: set `DJANGO_SECURE_SSL=True` and switch
    `MINIO_PUBLIC_ENDPOINT_URL` + `CSRF_TRUSTED_ORIGINS` to `https://...`.
 4. `sudo nginx -t && sudo systemctl reload nginx` and
-   `sudo systemctl restart mmftp-web mmftp-worker mmftp-beat`.
+   `sudo systemctl restart mmftp-web`.

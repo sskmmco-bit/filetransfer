@@ -52,13 +52,93 @@ cd "$APP"
 "$VENV"/bin/python manage.py migrate --noinput
 "$VENV"/bin/python manage.py collectstatic --noinput
 
-# ---- 4. fix ownership + restart the app services ----------------------------
+# ---- 4. migrate Celery worker/beat -> job timers (idempotent) ---------------
+# Older installs ran mmftp-worker / mmftp-beat (Celery). Retire them and (re)install
+# the oneshot services + timers that replaced them. Safe to run every update.
+if systemctl list-unit-files 'mmftp-worker.service' 'mmftp-beat.service' \
+     --no-legend 2>/dev/null | grep -q .; then
+  log "Retiring legacy Celery units (mmftp-worker / mmftp-beat)"
+  systemctl disable --now mmftp-worker.service mmftp-beat.service 2>/dev/null || true
+  rm -f /etc/systemd/system/mmftp-worker.service /etc/systemd/system/mmftp-beat.service
+fi
+
+log "Installing background-job timers"
+cat >/etc/systemd/system/mmftp-onfailure@.service <<'EOF'
+[Unit]
+Description=Log failure of %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -t mmftp-job "unit %i failed"
+EOF
+
+mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
+  cat >/etc/systemd/system/$1.service <<EOF
+[Unit]
+Description=$2
+After=network.target postgresql.service redis-server.service minio.service
+OnFailure=mmftp-onfailure@%n.service
+
+[Service]
+Type=oneshot
+User=www-data
+WorkingDirectory=$APP
+EnvironmentFile=$ENVF
+ExecStart=$VENV/bin/python $APP/manage.py $3
+EOF
+}
+
+mk_job mmftp-notifications "MMFileTransfer deferred-email drain"  "send_queued_notifications"
+mk_job mmftp-purge         "MMFileTransfer daily purge/expiry"    "purge_expired_files"
+mk_job mmftp-reminders     "MMFileTransfer daily expiry reminders" "send_expiry_reminders"
+
+cat >/etc/systemd/system/mmftp-notifications.timer <<'EOF'
+[Unit]
+Description=Drain the deferred-email queue every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+cat >/etc/systemd/system/mmftp-purge.timer <<'EOF'
+[Unit]
+Description=Daily file purge / expiry cleanup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+cat >/etc/systemd/system/mmftp-reminders.timer <<'EOF'
+[Unit]
+Description=Daily expiry-reminder emails
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# ---- 5. fix ownership + restart/enable services -----------------------------
 log "Restarting services"
 chown -R www-data:www-data "$APP" "$VENV"
-systemctl restart mmftp-web mmftp-worker mmftp-beat
+systemctl daemon-reload
+systemctl restart mmftp-web
+systemctl enable --now mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer
 sleep 4
 
 log "STATUS"
-systemctl is-active mmftp-web mmftp-worker mmftp-beat || true
+systemctl is-active mmftp-web || true
+systemctl list-timers 'mmftp-*' --no-pager || true
 curl -s -o /dev/null -w "  health: HTTP %{http_code}\n" "http://127.0.0.1/healthz" || true
 echo -e "\n\033[1;32mUpdate complete.\033[0m"

@@ -5,6 +5,12 @@ v1 core = Phases 0–5; v1 security extensions = Phase 6; Phase 7 = hardening.
 
 Status legend: ✅ done · 🟡 partial · ⬜ not started
 
+> **2026-06-17 — Celery removed.** Background work (deferred email, daily purge,
+> expiry reminders) now runs as Django management commands on **systemd timers**;
+> thumbnails are generated inline on activation. Redis is kept as the Django cache
+> only. Historical phase entries below that mention Celery/worker/beat describe the
+> prior implementation. See `plans/20260617_103718_replace-celery-with-cron-commands.md`.
+
 ---
 
 ## Current state (audited)
@@ -23,7 +29,7 @@ Status legend: ✅ done · 🟡 partial · ⬜ not started
 ### Phase 0 — done
 - Django 5.1 skeleton; 8 apps scaffolded (accounts, core, config, files, notifications, audit, public).
 - `AUTH_USER_MODEL = accounts.User` set before first migration.
-- Infra verified running: web/worker/beat + postgres/redis/minio/createbuckets; nginx conf; entrypoints; S3/MinIO storage backend; Redis cache + Celery broker; `/healthz`; Celery Beat schedule with `ping` + placeholder `purge_expired_files`.
+- Infra verified running: web/worker/beat + postgres/redis/minio; nginx conf; S3/MinIO storage backend; Redis cache + Celery broker; `/healthz`; Celery Beat schedule with `ping` + placeholder `purge_expired_files`.
 
 ### Phase 1 — what already exists (starter slice)
 - `User` model with `employee_id`, `auth_source`, **temporary `role` string** (not real Role tables), profile fields, behaviour flags.
@@ -47,7 +53,7 @@ Status legend: ✅ done · 🟡 partial · ⬜ not started
 - [x] **Login security flow** (§4): throttle + hard block in `apps/accounts/security.py`, wired into `MMLoginView`; LoginAttempt + ActivityLog on every login/logout; session rotation via Django's LoginView. Verified end-to-end.
 - [x] **LDAP config + JIT provisioning** (§5): `MultiIdentifierBackend` LDAP bind + attribute sync + first-login JIT (role=Uploader) + local-wins collision; Fernet-encrypted bind password in SiteSettings.
 - [x] SiteSettings: LDAP fields + write-only password admin field; `session_idle_timeout_minutes`.
-- [ ] **PENDING (blocked):** rebuild the Docker image to install `ldap3` + `cryptography` so the LDAP runtime path and Fernet encryption execute. Corporate TLS-intercepting proxy is blocking pypi.org during `pip install`. Code is in place and imports lazily, so the app runs fine without them until the LDAP/encrypted-password paths are exercised.
+- [ ] **PENDING (blocked):** `pip install` `ldap3` + `cryptography` into the venv so the LDAP runtime path and Fernet encryption execute. Corporate TLS-intercepting proxy is blocking pypi.org during `pip install`. Code is in place and imports lazily, so the app runs fine without them until the LDAP/encrypted-password paths are exercised.
 - [ ] Session idle-timeout *enforcement* middleware (field exists; wiring is a small follow-up).
 
 ### Phase 2 — Files core ✅ DONE (2026-06-11) — verified against MinIO

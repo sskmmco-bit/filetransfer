@@ -1,10 +1,15 @@
 """Notification bookkeeping (§5.11).
 
-NotificationLog enforces at-most-once delivery for deferred (Celery) email: a
-unique idempotency_key means the same logical notification is enqueued once.
-`sent_at` (the plan's notification_sent_at) is set ONLY when SMTP delivery
-actually succeeds. On permanent failure the row is marked failed so it can be
-re-enqueued later.
+NotificationLog enforces at-most-once delivery for deferred email: a unique
+idempotency_key means the same logical notification is enqueued once. The
+`send_queued_notifications` management command drains it (see
+apps.notifications.jobs). `sent_at` (the plan's notification_sent_at) is set
+ONLY when SMTP delivery actually succeeds. On permanent failure the row is
+marked failed so it can be re-enqueued later.
+
+A row is claimed for sending by marking it SENDING + stamping `claimed_at`; the
+drain sends OUTSIDE the row lock, and a row stuck in SENDING past the stale
+bound (a crashed run) is re-claimed on a later pass.
 """
 from __future__ import annotations
 
@@ -20,6 +25,7 @@ class EmailType(models.TextChoices):
 
 class NotificationStatus(models.TextChoices):
     PENDING = "pending", "Pending"
+    SENDING = "sending", "Sending"  # claimed by a drain run, SMTP in progress
     SENT = "sent", "Sent"
     FAILED = "failed", "Failed"
 
@@ -40,6 +46,9 @@ class NotificationLog(models.Model):
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     sent_at = models.DateTimeField(null=True, blank=True)  # notification_sent_at
+    # Stamped when a drain run claims the row (status -> SENDING). Used to reclaim
+    # rows abandoned by a crashed run (claimed_at older than the stale bound).
+    claimed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "notifications_log"

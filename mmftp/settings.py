@@ -18,8 +18,9 @@ env = environ.Env(
     DJANGO_SECURE_SSL=(bool, False),
 )
 
-# Read a .env file if present (Docker passes env directly via env_file, but this
-# helps local non-Docker runs).
+# Read a .env file if present. On a server install the systemd units pass the
+# environment in via EnvironmentFile; this covers local runs where the shell
+# hasn't sourced .env.
 environ.Env.read_env(BASE_DIR / ".env")
 
 # ---------------------------------------------------------------------------
@@ -106,8 +107,10 @@ DATABASES = {
 }
 
 # ---------------------------------------------------------------------------
-# Cache + Celery (Redis)
+# Cache (Redis)
 # ---------------------------------------------------------------------------
+# Background jobs run as management commands on systemd timers (no Celery/broker);
+# Redis is used only as the Django cache backend.
 REDIS_URL = env("REDIS_URL", default="redis://redis:6379/0")
 
 CACHES = {
@@ -118,19 +121,12 @@ CACHES = {
     }
 }
 
-CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
-CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
-CELERY_TASK_ACKS_LATE = True
-CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-CELERY_TASK_TIME_LIMIT = 60 * 30
-CELERY_TIMEZONE = env("DJANGO_TIME_ZONE", default="UTC")
-
 # ---------------------------------------------------------------------------
 # Object storage (MinIO via the S3 API) + static files
 # ---------------------------------------------------------------------------
-MINIO_ENDPOINT_URL = env("MINIO_ENDPOINT_URL", default="http://minio:9000")
-# Browser-reachable endpoint used when MINTING presigned URLs (the in-container
-# minio:9000 host is not resolvable from a user's browser). In production this
+MINIO_ENDPOINT_URL = env("MINIO_ENDPOINT_URL", default="http://127.0.0.1:9000")
+# Browser-reachable endpoint used when MINTING presigned URLs (the loopback
+# 127.0.0.1:9000 host is not reachable from a user's browser). In production this
 # is the public S3/MinIO domain behind nginx.
 MINIO_PUBLIC_ENDPOINT_URL = env("MINIO_PUBLIC_ENDPOINT_URL", default="http://localhost:9000")
 MINIO_BUCKET = env("MINIO_BUCKET", default="mmftp-files")
@@ -221,7 +217,7 @@ if env("DJANGO_SECURE_SSL"):
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS", default=["http://localhost", "http://127.0.0.1:8000"])
 
 # ---------------------------------------------------------------------------
-# Email (transactional inline; deferred via Celery — wired further in Phase 4)
+# Email (transactional inline; deferred via the NotificationLog queue + drain command)
 # ---------------------------------------------------------------------------
 EMAIL_BACKEND = env(
     "DJANGO_EMAIL_BACKEND",
@@ -240,7 +236,7 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------------------------------------------------------------------------
-# Logging — simple console logging suitable for containers
+# Logging — simple console logging (captured by systemd/journald in production)
 # ---------------------------------------------------------------------------
 LOGGING = {
     "version": 1,

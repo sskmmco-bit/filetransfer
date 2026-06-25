@@ -87,7 +87,7 @@ def provision_or_sync_ldap_user(settings_obj, identifier: str, attrs: dict):
         message=f"Provisioned from LDAP as Uploader ({email})",
     )
     try:
-        from apps.notifications.tasks import enqueue_welcome_email
+        from apps.notifications.jobs import enqueue_welcome_email
 
         enqueue_welcome_email(user)
     except Exception:  # noqa: BLE001 — welcome mail is best-effort

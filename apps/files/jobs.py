@@ -1,26 +1,31 @@
-"""Files Celery tasks (§5.6.2, §5.8, §5.11).
+"""Files background jobs (§5.6.2, §5.8, §5.11).
 
-generate_thumbnail   — deferred image thumbnailing after activation.
-purge_expired_files  — daily cleanup. Phase 2 implements the abandoned-upload
-                       step (hard-delete uploading/pending_metadata rows whose
-                       session expired ~24h and remove their MinIO temp
-                       objects) and writes a CronLog. The retention/expiry
-                       soft-delete steps stay OFF until Phase 5.
+Formerly Celery tasks; now plain functions:
+
+generate_thumbnail   — image thumbnailing, called synchronously on activation
+                       (apps.files.services). Best-effort: failures are logged and
+                       never block activation. Sources larger than
+                       THUMBNAIL_MAX_SOURCE_BYTES are skipped so a huge image can't
+                       stall the request thread.
+purge_expired_files  — daily cleanup, run by the purge_expired_files management
+                       command: retention + per-file expiry soft-deletes,
+                       abandoned-upload hard-delete + temp cleanup, and a CronLog.
 """
 from __future__ import annotations
 
 import io
 import logging
 
-from celery import shared_task
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
 THUMBNAIL_SIZE = (320, 320)
+# Skip thumbnailing originals larger than this — generation runs inline on the
+# request thread (no Celery worker), so a huge image would stall the response.
+THUMBNAIL_MAX_SOURCE_BYTES = 25 * 1024 * 1024  # 25 MiB
 
 
-@shared_task(name="apps.files.tasks.generate_thumbnail")
 def generate_thumbnail(stored_file_id: int) -> dict:
     """Create a JPEG thumbnail for image files and store it in MinIO."""
     from . import storage
@@ -29,6 +34,9 @@ def generate_thumbnail(stored_file_id: int) -> dict:
     sf = StoredFile.objects.filter(pk=stored_file_id, status=FileStatus.ACTIVE).first()
     if not sf or not sf.content_type.startswith("image/"):
         return {"thumbnail": False, "reason": "not an active image"}
+    if sf.size and sf.size > THUMBNAIL_MAX_SOURCE_BYTES:
+        logger.info("generate_thumbnail: skipping %s (%s bytes > cap)", stored_file_id, sf.size)
+        return {"thumbnail": False, "reason": "source too large"}
 
     try:
         from PIL import Image
@@ -55,7 +63,6 @@ def generate_thumbnail(stored_file_id: int) -> dict:
         return {"thumbnail": False, "reason": str(exc)}
 
 
-@shared_task(name="apps.files.tasks.purge_expired_files")
 def purge_expired_files() -> dict:
     """Daily housekeeping (§5.6.2 / §8). Four stable steps:
 

@@ -7,9 +7,10 @@ Two clearly separated steps:
                          file to `pending_metadata`. Never touches the final key.
   activate_file()      — metadata is saved and the file goes live: copy temp ->
                          final key, set uploaded_at, create FileAssignment rows,
-                         enqueue Celery tasks, delete the temp object/session.
-                         Row-locked and idempotent: a retried request never
-                         double-copies objects or double-sends mail.
+                         generate the thumbnail + queue notification emails, delete
+                         the temp object/session. Row-locked and idempotent: a
+                         retried request never double-copies objects or double-sends
+                         mail.
 """
 from __future__ import annotations
 
@@ -191,7 +192,7 @@ def add_recipients(stored_file_id: int, *, recipient_ids=None, groups=None,
 
 def _notify_recipients(stored_file_id: int, recipient_ids) -> None:
     """Send assignment-notification emails to specific recipients of a file."""
-    from apps.notifications.tasks import enqueue_assignment_email
+    from apps.notifications.jobs import enqueue_assignment_email
 
     for assignment in FileAssignment.objects.filter(
         stored_file_id=stored_file_id, recipient_id__in=list(recipient_ids)
@@ -200,13 +201,17 @@ def _notify_recipients(stored_file_id: int, recipient_ids) -> None:
 
 
 def _enqueue_post_activation(stored_file_id: int, *, notify: bool = True) -> None:
-    """Fire Celery tasks after the activation commits (§5.8, §5.11)."""
-    from apps.notifications.tasks import enqueue_assignment_email
+    """Post-activation work, run after the activation commits (§5.8, §5.11).
 
+    Thumbnailing runs synchronously here (best-effort, never raises); assignment
+    emails are queued to NotificationLog for the send_queued_notifications drain.
+    """
+    from apps.notifications.jobs import enqueue_assignment_email
+
+    from .jobs import generate_thumbnail
     from .models import FileAssignment
-    from .tasks import generate_thumbnail
 
-    generate_thumbnail.delay(stored_file_id)
+    generate_thumbnail(stored_file_id)
 
     if not notify:
         return

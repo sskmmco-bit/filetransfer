@@ -1,12 +1,16 @@
-"""Email plumbing — shared by the transactional (inline) and deferred (Celery)
-paths (§5.11).
+"""Email plumbing — shared by the transactional (inline) and deferred paths (§5.11).
 
 Both tiers share the same SMTP connection and templates but NOT the same queue:
   * transactional — sent synchronously in the request (a user is waiting).
-  * deferred      — handed to Celery (apps.notifications.tasks).
+  * deferred      — queued in NotificationLog, drained by send_queued_notifications
+                    (apps.notifications.jobs).
 
 SMTP connection details come from the runtime SiteSettings singleton; when SMTP
 is disabled we fall back to Django's configured backend (console in dev).
+
+Connections carry an explicit socket timeout (SMTP_TIMEOUT_SECONDS) so a stuck
+send fails fast — the deferred drain relies on a send never outliving its own
+timeout (its claim stale bound is set well above this; see jobs.py).
 """
 from __future__ import annotations
 
@@ -17,6 +21,10 @@ from django.core.mail import EmailMessage, get_connection
 from django.template.loader import render_to_string
 
 logger = logging.getLogger(__name__)
+
+# Socket timeout for SMTP sends. Must stay below jobs.NOTIFICATION_CLAIM_STALE_MINUTES
+# so a slow-but-live send can never be re-claimed and double-sent.
+SMTP_TIMEOUT_SECONDS = 30
 
 
 def get_email_connection():
@@ -37,6 +45,7 @@ def get_email_connection():
             password=s.get_smtp_password() or None,
             use_tls=use_tls,
             use_ssl=use_ssl,
+            timeout=SMTP_TIMEOUT_SECONDS,
         )
     return get_connection()
 

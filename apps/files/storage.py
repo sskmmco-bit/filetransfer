@@ -28,7 +28,7 @@ def _build_client(endpoint_url):
 
 
 def get_client():
-    """Cached boto3 S3 client for server-side ops (in-container endpoint)."""
+    """Cached boto3 S3 client for server-side ops (loopback endpoint)."""
     global _client
     if _client is None:
         _client = _build_client(settings.MINIO_ENDPOINT_URL)

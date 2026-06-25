@@ -10,9 +10,10 @@ search weighted highest since it's the newest hot path.
 Each simulated user logs in once against `/accounts/login/`, handling the CSRF
 token exactly like a browser.
 
-## Option A — run Locust on your host (simplest)
+## Running Locust
 
-The dev stack already exposes the app on `localhost:8000`.
+Point it at a running instance of the app (`runserver` for dev, or Gunicorn
+behind nginx for realistic numbers).
 
 ```bash
 pip install -r requirements-dev.txt        # installs locust (+ app deps)
@@ -30,58 +31,21 @@ locust -f load_tests/locustfile.py --host http://localhost:8000 \
   --csv load_tests/report --exit-code-on-error 1
 ```
 
-## Option B — run Locust in Docker (on the project network)
-
-Uses [`../docker-compose.locust.yml`](../docker-compose.locust.yml); targets the
-app as `http://web:8000`, so no host networking needed.
-
-```bash
-# Web UI
-docker compose -f docker-compose.yml -f docker-compose.locust.yml up locust
-# → http://localhost:8089
-
-# Headless
-docker compose -f docker-compose.yml -f docker-compose.locust.yml run --rm \
-  locust -f /mnt/locust/locustfile.py --host http://web:8000 \
-  --users 50 --spawn-rate 5 --run-time 5m --headless
-```
-
 ## Testing against the production-like stack (Gunicorn + nginx)
 
 The dev `runserver` (single-threaded, `DEBUG=True`) is **not** representative.
-For real throughput numbers, load-test the prod-like stack from
-`docker-compose.prod.yml` (Gunicorn, 3 workers, `DEBUG=False`, nginx front door).
+For real throughput numbers, load-test against the production-like stack —
+Gunicorn (multiple workers, `DEBUG=False`) behind nginx, as set up by
+`deploy/INSTALL_NO_DOCKER.md`.
 
-1. Bring up the prod stack (data in postgres/minio volumes is preserved):
+Point `--host` at the server: `http://<server>/` exercises the **full edge**
+through nginx, while `http://<server>:8000` (if Gunicorn's port is reachable)
+hits the app tier directly.
 
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
-   ```
-
-2. Start Locust on the same network (all three `-f` files):
-
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-     -f docker-compose.locust.yml up locust
-   ```
-
-3. Open <http://localhost:8089>. The **Host** box is pre-filled with
-   `http://web:8000` — that hits Gunicorn directly (the app tier, which is what
-   determines throughput). To exercise the **full production path through
-   nginx**, change the Host box to `http://nginx` before starting (requires
-   `nginx` in `DJANGO_ALLOWED_HOSTS` — already added to `.env`).
-
-To switch back to the dev stack afterwards:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml down
-docker compose up -d
-```
-
-> `web:8000` vs `nginx`: hitting Gunicorn directly isolates app capacity (DB,
-> Redis, Django, worker count) — usually what you want to measure. nginx adds
+> Hitting Gunicorn directly isolates app capacity (DB, Redis, Django, worker
+> count) — usually what you want to measure. nginx adds
 > proxying/buffering/keepalive but is rarely the bottleneck for dynamic
-> requests. Test through `nginx` when you specifically want to validate the
+> requests. Test through nginx when you specifically want to validate the
 > whole edge (e.g. timeouts, `client_max_body_size`, connection limits).
 
 ## Credentials
@@ -125,6 +89,6 @@ a pool instead of the single `LOCUST_USER`.
   page size, which is fine for steady-state load.
 - Point `--host` at a staging/perf environment for meaningful numbers — the
   dev `runserver` (single-threaded, `DEBUG=True`) is **not** representative.
-  Use the prod-like stack (`docker-compose.prod.yml`, Gunicorn + nginx) to
-  measure real throughput.
+  Use the prod-like stack (Gunicorn + nginx, per `deploy/INSTALL_NO_DOCKER.md`)
+  to measure real throughput.
 ```
