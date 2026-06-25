@@ -3,17 +3,23 @@
 Internal file-transfer application — **Phase 0 / Phase 1 starter scaffold**.
 
 Stack: **Django 5 + Gunicorn**, **nginx** reverse proxy, **PostgreSQL**, **MinIO**
-(S3-compatible object storage), **Redis** (Django cache). Background jobs run as
-Django management commands on **systemd timers** (no Celery). Runs directly on a
-Linux host — **no Docker**.
+(S3-compatible object storage). The Django cache is in-process (no Redis).
+Background jobs run as Django management commands on **systemd timers** (no Celery).
+Runs directly on a Linux host — **no Docker**.
 
 ---
 
 ## Quick start (development)
 
-You need PostgreSQL, Redis, and MinIO running on the host first — see
-[`deploy/INSTALL_NO_DOCKER.md`](deploy/INSTALL_NO_DOCKER.md) for installing them.
-Then:
+You need PostgreSQL and MinIO running first (no Redis). For local dev on
+Windows/macOS the easiest way is the dev compose file:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d   # Postgres + MinIO + bucket
+```
+
+For a server, install them as host services — see
+[`deploy/INSTALL_NO_DOCKER.md`](deploy/INSTALL_NO_DOCKER.md). Then:
 
 ```bash
 python -m venv venv
@@ -42,14 +48,15 @@ Once it's up:
 | http://localhost:8000/ | Dashboard (redirects to login) |
 | http://localhost:8000/accounts/login/ | Login — accepts employee ID, email, **or** username |
 | http://localhost:8000/admin/ | Django admin |
-| http://localhost:8000/healthz | JSON health probe (checks DB + Redis) |
+| http://localhost:8000/healthz | JSON health probe (checks DB + cache) |
 | http://localhost:9001/ | MinIO console |
 
 ## Production-like run
 
 On a server, the app runs under **Gunicorn** behind **nginx** (port 80) with
-`DEBUG=False`, as three `systemd` units (`mmftp-web`, `mmftp-worker`,
-`mmftp-beat`). The full procedure — plus a one-command installer
+`DEBUG=False` as the `mmftp-web` `systemd` unit, with background jobs on three
+`systemd` timers (`mmftp-notifications`, `mmftp-purge`, `mmftp-reminders`). The
+full procedure — plus a one-command installer
 (`deploy/install_no_docker.sh`) — is in
 [`deploy/INSTALL_NO_DOCKER.md`](deploy/INSTALL_NO_DOCKER.md). Set real secrets,
 `DJANGO_DEBUG=False`, `DJANGO_SECURE_SSL=True`, and a proper `TRUSTED_PROXY_IPS` /
@@ -106,12 +113,12 @@ deploy/                no-Docker install guide, installer scripts, nginx + env t
 - **Multi-identifier login** — resolves employee ID / email / username, local-wins (§5.7.1a).
 - Dashboard shell with placeholder widgets, login-gated.
 - `SiteSettings` singleton with general + retention fields.
-- Settings fully wired for PostgreSQL, Redis cache, and MinIO object storage
+- Settings fully wired for PostgreSQL, in-process cache, and MinIO object storage
   (presigned URLs, private bucket).
 - `get_client_ip()`-ready proxy settings (`TRUSTED_PROXY_IPS`, `SECURE_PROXY_SSL_HEADER`).
 - Background jobs as management commands on systemd timers (`send_queued_notifications`,
   `purge_expired_files`, `send_expiry_reminders`) — no Celery/broker.
-- Health endpoint that checks DB and Redis.
+- Health endpoint that checks DB and cache.
 
 ## What's intentionally deferred (next steps from the plan)
 

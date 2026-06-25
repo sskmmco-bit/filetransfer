@@ -5,10 +5,8 @@ Django==5.1.4
 psycopg[binary]==3.2.3          # PostgreSQL driver (psycopg 3)
 django-environ==0.11.2          # 12-factor env config
 
-# Cache (Redis) — background jobs run as management commands on systemd timers,
-# not Celery, so no broker/worker dependency.
-redis==5.2.1
-django-redis==5.4.0             # Redis cache backend
+# Cache: Django's built-in in-memory LocMemCache — no Redis, no broker, no
+# external cache service. Background jobs run as systemd-timer management commands.
 
 # Object storage (MinIO via S3 API)
 django-storages==1.14.4

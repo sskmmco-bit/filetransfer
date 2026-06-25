@@ -24,10 +24,10 @@ talk to each other over `localhost`:
 | Service | Role | Runs as |
 |---|---|---|
 | PostgreSQL | database (users, file metadata, audit) | OS service |
-| Redis | Django cache | OS service |
 | MinIO | file storage (files live in a folder on this disk) | systemd service |
 | Gunicorn | the Django web app | `mmftp-web.service` |
 | Deferred-email drain | sends queued emails (~every 2 min) | `mmftp-notifications.timer` |
+| Thumbnail generation | thumbnails new images (~every 2 min) | `mmftp-thumbnails.timer` |
 | Daily purge | expiry/retention + abandoned-upload cleanup | `mmftp-purge.timer` |
 | Daily reminders | expiry-reminder emails | `mmftp-reminders.timer` |
 | nginx | reverse proxy + serves downloads | OS service |
@@ -62,15 +62,15 @@ A few pieces go to standard system locations:
 **Ubuntu / Debian:**
 ```bash
 sudo apt update
-sudo apt install -y python3.12 python3.12-venv postgresql redis-server nginx libmagic1
-sudo systemctl enable --now postgresql redis-server nginx
+sudo apt install -y python3.12 python3.12-venv postgresql nginx libmagic1
+sudo systemctl enable --now postgresql nginx
 ```
 
 **RHEL / Rocky / Alma:**
 ```bash
-sudo dnf install -y python3.12 postgresql-server redis nginx file-libs
+sudo dnf install -y python3.12 postgresql-server nginx file-libs
 sudo postgresql-setup --initdb
-sudo systemctl enable --now postgresql redis nginx
+sudo systemctl enable --now postgresql nginx
 ```
 
 ## STEP 2 — Put the code on the server
@@ -177,12 +177,7 @@ POSTGRES_PASSWORD=CHOOSE_A_DB_PASSWORD       # must match Step 4
 POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=5432
 
-# --- Redis (same machine → 127.0.0.1) ---
-REDIS_URL=redis://127.0.0.1:6379/0
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-CELERY_BROKER_URL=redis://127.0.0.1:6379/0
-CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
+# --- Cache: in-process LocMemCache, nothing to configure (no Redis) ---
 
 # --- MinIO ---
 MINIO_ENDPOINT_URL=http://127.0.0.1:9000          # how the APP reaches MinIO
@@ -290,7 +285,7 @@ enough behind nginx.
 ```ini
 [Unit]
 Description=MMFileTransfer web (Gunicorn)
-After=network.target postgresql.service redis.service minio.service
+After=network.target postgresql.service minio.service
 
 [Service]
 User=www-data
@@ -321,7 +316,7 @@ Each job is a `Type=oneshot` service — e.g. the deferred-email drain
 ```ini
 [Unit]
 Description=MMFileTransfer deferred-email drain
-After=network.target postgresql.service redis.service minio.service
+After=network.target postgresql.service minio.service
 OnFailure=mmftp-onfailure@%n.service
 
 [Service]
@@ -332,9 +327,10 @@ EnvironmentFile=/opt/mmftp/.env
 ExecStart=/opt/mmftp/venv/bin/python /opt/mmftp/app/manage.py send_queued_notifications
 ```
 
-…with `mmftp-purge.service` (`… manage.py purge_expired_files`) and
-`mmftp-reminders.service` (`… manage.py send_expiry_reminders`) following the same
-shape. Each has a matching `.timer`:
+…with `mmftp-purge.service` (`… manage.py purge_expired_files`),
+`mmftp-reminders.service` (`… manage.py send_expiry_reminders`), and
+`mmftp-thumbnails.service` (`… manage.py generate_pending_thumbnails`) following the
+same shape. Each has a matching `.timer`:
 ```ini
 # /etc/systemd/system/mmftp-notifications.timer — every 2 minutes
 [Unit]
@@ -346,6 +342,7 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 
+# /etc/systemd/system/mmftp-thumbnails.timer — every 2 min (same shape as notifications)
 # /etc/systemd/system/mmftp-purge.timer — daily 03:00   -> OnCalendar=*-*-* 03:00:00
 # /etc/systemd/system/mmftp-reminders.timer — daily 07:00 -> OnCalendar=*-*-* 07:00:00
 ```
@@ -358,7 +355,7 @@ Start the web service and enable the **timers** (not the job services):
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now mmftp-web \
-     mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer
+     mmftp-notifications.timer mmftp-thumbnails.timer mmftp-purge.timer mmftp-reminders.timer
 ```
 
 (The one-command installer `install_no_docker.sh` writes all of these for you.)
@@ -406,12 +403,12 @@ Thumbnails are generated inline on activation (no job).
 
 ```bash
 # Web + infra running?
-systemctl status postgresql redis nginx minio mmftp-web
+systemctl status postgresql nginx minio mmftp-web
 
 # Background-job timers scheduled? (shows NEXT/LAST run per timer)
 systemctl list-timers 'mmftp-*' --no-pager
 
-# Health probe (DB + Redis):
+# Health probe (DB + cache):
 curl -s http://127.0.0.1:8000/healthz
 
 # Logs if something is wrong:
@@ -435,7 +432,7 @@ fully offline.**
 sudo systemctl restart mmftp-web
 
 # Run a background job by hand (e.g. to test it now instead of waiting for the timer):
-sudo systemctl start mmftp-notifications.service   # or mmftp-purge / mmftp-reminders
+sudo systemctl start mmftp-notifications.service   # or mmftp-thumbnails / mmftp-purge / mmftp-reminders
 
 # Tail logs:
 journalctl -u mmftp-web -f

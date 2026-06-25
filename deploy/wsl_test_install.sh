@@ -39,10 +39,10 @@ log() { echo -e "\n\033[1;36m==> $*\033[0m"; }
 # ---- STEP 1: system packages -------------------------------------------------
 log "STEP 1  apt packages"
 apt-get update -y
-apt-get install -y python3.12 python3.12-venv postgresql redis-server nginx curl rsync
+apt-get install -y python3.12 python3.12-venv postgresql nginx curl rsync
 # libmagic shared lib (name changed on 24.04 due to the t64 transition)
 apt-get install -y libmagic1t64 || apt-get install -y libmagic1
-systemctl enable --now postgresql redis-server
+systemctl enable --now postgresql
 
 # ---- STEP 2: folders + copy code --------------------------------------------
 log "STEP 2  lay out /opt/mmftp and copy the code"
@@ -114,11 +114,6 @@ POSTGRES_USER=mmftp
 POSTGRES_PASSWORD=$DB_PASS
 POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=5432
-REDIS_URL=redis://127.0.0.1:6379/0
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-CELERY_BROKER_URL=redis://127.0.0.1:6379/0
-CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
 MINIO_ENDPOINT_URL=http://127.0.0.1:9000
 MINIO_PUBLIC_ENDPOINT_URL=http://localhost
 MINIO_BUCKET=mmftp-files
@@ -172,6 +167,17 @@ server {
     proxy_read_timeout    3600s;
     proxy_send_timeout    3600s;
 
+    gzip on;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    location /static/ {
+        alias APP_PATH/staticfiles/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host              $host;
@@ -188,6 +194,8 @@ server {
     }
 }
 EOF
+# The heredoc is single-quoted (literal), so substitute the app path afterward.
+sed -i "s#APP_PATH#$APP#g" /etc/nginx/sites-available/mmftp
 ln -sf /etc/nginx/sites-available/mmftp /etc/nginx/sites-enabled/mmftp
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
@@ -201,13 +209,13 @@ chown -R www-data:www-data "$APP" "$VENV"
 cat >/etc/systemd/system/mmftp-web.service <<EOF
 [Unit]
 Description=MMFileTransfer web (Gunicorn)
-After=network.target postgresql.service redis-server.service minio.service
+After=network.target postgresql.service minio.service
 
 [Service]
 User=www-data
 WorkingDirectory=$APP
 EnvironmentFile=$ENVF
-ExecStart=$VENV/bin/gunicorn mmftp.wsgi:application --bind 127.0.0.1:8000 --workers 3 --threads 3 --timeout 600
+ExecStart=$VENV/bin/gunicorn mmftp.wsgi:application --bind 127.0.0.1:8000 --workers 3 --threads 3 --preload --max-requests 1000 --max-requests-jitter 200 --timeout 600
 Restart=always
 RestartSec=3
 
@@ -229,7 +237,7 @@ mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
   cat >/etc/systemd/system/$1.service <<EOF
 [Unit]
 Description=$2
-After=network.target postgresql.service redis-server.service minio.service
+After=network.target postgresql.service minio.service
 OnFailure=mmftp-onfailure@%n.service
 
 [Service]
@@ -244,6 +252,7 @@ EOF
 mk_job mmftp-notifications "MMFileTransfer deferred-email drain"  "send_queued_notifications"
 mk_job mmftp-purge         "MMFileTransfer daily purge/expiry"    "purge_expired_files"
 mk_job mmftp-reminders     "MMFileTransfer daily expiry reminders" "send_expiry_reminders"
+mk_job mmftp-thumbnails    "MMFileTransfer pending-thumbnail generation" "generate_pending_thumbnails"
 
 cat >/etc/systemd/system/mmftp-notifications.timer <<'EOF'
 [Unit]
@@ -282,13 +291,26 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+cat >/etc/systemd/system/mmftp-thumbnails.timer <<'EOF'
+[Unit]
+Description=Generate pending image thumbnails every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
-systemctl enable --now mmftp-web mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer
+systemctl enable --now mmftp-web mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer mmftp-thumbnails.timer
 sleep 6
 
 # ---- STEP 10: report ---------------------------------------------------------
 log "STEP 10  status"
-systemctl is-active postgresql redis-server minio nginx mmftp-web || true
+systemctl is-active postgresql minio nginx mmftp-web || true
 systemctl list-timers 'mmftp-*' --no-pager || true
 echo
 echo "Health probe:"

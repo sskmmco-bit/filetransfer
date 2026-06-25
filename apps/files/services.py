@@ -203,15 +203,14 @@ def _notify_recipients(stored_file_id: int, recipient_ids) -> None:
 def _enqueue_post_activation(stored_file_id: int, *, notify: bool = True) -> None:
     """Post-activation work, run after the activation commits (§5.8, §5.11).
 
-    Thumbnailing runs synchronously here (best-effort, never raises); assignment
-    emails are queued to NotificationLog for the send_queued_notifications drain.
+    Thumbnailing is NOT done here anymore — it runs asynchronously off the request
+    thread via the generate_pending_thumbnails job (systemd timer), which picks up
+    any active image with no thumbnail yet. Assignment emails are queued to
+    NotificationLog for the send_queued_notifications drain.
     """
     from apps.notifications.jobs import enqueue_assignment_email
 
-    from .jobs import generate_thumbnail
     from .models import FileAssignment
-
-    generate_thumbnail(stored_file_id)
 
     if not notify:
         return

@@ -2,7 +2,7 @@
 # =============================================================================
 # MMFileTransfer — one-command installer (no Docker, Ubuntu/Debian)
 # -----------------------------------------------------------------------------
-# Installs and starts the whole stack (PostgreSQL, Redis, MinIO, Gunicorn, nginx,
+# Installs and starts the whole stack (PostgreSQL, MinIO, Gunicorn, nginx,
 # and the background-job systemd timers) on a clean Linux server. Needs internet
 # ONLY while running; the app runs fully offline afterward.
 #
@@ -55,9 +55,20 @@ log "Using SERVER_IP=$SERVER_IP   (override with SERVER_IP=... if wrong)"
 # ---- STEP 1: system packages -------------------------------------------------
 log "STEP 1  apt packages"
 apt-get update -y
-apt-get install -y python3.12 python3.12-venv postgresql redis-server nginx curl rsync
+apt-get install -y python3.12 python3.12-venv postgresql nginx curl rsync
 apt-get install -y libmagic1t64 || apt-get install -y libmagic1
-systemctl enable --now postgresql redis-server
+systemctl enable --now postgresql
+
+# ---- STEP 1b: PostgreSQL tuning (4 GB/2 vCPU drop-in) ------------------------
+log "STEP 1b  PostgreSQL tuning drop-in"
+PG_CONFD="$(find /etc/postgresql -maxdepth 3 -type d -name conf.d 2>/dev/null | head -n1)"
+if [[ -n "$PG_CONFD" ]]; then
+  install -m 644 "$SCRIPT_DIR/postgresql.tuning.conf" "$PG_CONFD/10-mmftp-tuning.conf"
+  systemctl restart postgresql
+  log "  applied $PG_CONFD/10-mmftp-tuning.conf and restarted postgresql"
+else
+  log "  conf.d not found — apply deploy/postgresql.tuning.conf manually"
+fi
 
 # ---- STEP 2: swap (safety net on low-RAM servers) ---------------------------
 if [[ "$(swapon --show --noheadings | wc -l)" -eq 0 && ! -f /swapfile ]]; then
@@ -167,11 +178,6 @@ POSTGRES_USER=mmftp
 POSTGRES_PASSWORD=$DB_PASS
 POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=$PG_PORT
-REDIS_URL=redis://127.0.0.1:6379/0
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-CELERY_BROKER_URL=redis://127.0.0.1:6379/0
-CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
 MINIO_ENDPOINT_URL=http://127.0.0.1:9000
 MINIO_PUBLIC_ENDPOINT_URL=http://$SERVER_IP
 MINIO_BUCKET=mmftp-files
@@ -225,6 +231,19 @@ server {
     proxy_read_timeout    3600s;
     proxy_send_timeout    3600s;
 
+    gzip on;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # Static assets are content-hashed (CompressedManifestStaticFilesStorage), so
+    # serve them straight from disk with a long immutable cache — off the Python tier.
+    location /static/ {
+        alias APP_PATH/staticfiles/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host              $host;
@@ -241,6 +260,8 @@ server {
     }
 }
 EOF
+# The heredoc is single-quoted (literal), so substitute the app path afterward.
+sed -i "s#APP_PATH#$APP#g" /etc/nginx/sites-available/mmftp
 ln -sf /etc/nginx/sites-available/mmftp /etc/nginx/sites-enabled/mmftp
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
@@ -254,13 +275,13 @@ chown -R www-data:www-data "$APP" "$VENV"
 cat >/etc/systemd/system/mmftp-web.service <<EOF
 [Unit]
 Description=MMFileTransfer web (Gunicorn)
-After=network.target postgresql.service redis-server.service minio.service
+After=network.target postgresql.service minio.service
 
 [Service]
 User=www-data
 WorkingDirectory=$APP
 EnvironmentFile=$ENVF
-ExecStart=$VENV/bin/gunicorn mmftp.wsgi:application --bind 127.0.0.1:8000 --workers 3 --threads 3 --timeout 600
+ExecStart=$VENV/bin/gunicorn mmftp.wsgi:application --bind 127.0.0.1:8000 --workers 3 --threads 3 --preload --max-requests 1000 --max-requests-jitter 200 --timeout 600
 Restart=always
 RestartSec=3
 
@@ -283,7 +304,7 @@ mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
   cat >/etc/systemd/system/$1.service <<EOF
 [Unit]
 Description=$2
-After=network.target postgresql.service redis-server.service minio.service
+After=network.target postgresql.service minio.service
 OnFailure=mmftp-onfailure@%n.service
 
 [Service]
@@ -298,6 +319,7 @@ EOF
 mk_job mmftp-notifications "MMFileTransfer deferred-email drain"  "send_queued_notifications"
 mk_job mmftp-purge         "MMFileTransfer daily purge/expiry"    "purge_expired_files"
 mk_job mmftp-reminders     "MMFileTransfer daily expiry reminders" "send_expiry_reminders"
+mk_job mmftp-thumbnails    "MMFileTransfer pending-thumbnail generation" "generate_pending_thumbnails"
 
 cat >/etc/systemd/system/mmftp-notifications.timer <<'EOF'
 [Unit]
@@ -336,13 +358,26 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+cat >/etc/systemd/system/mmftp-thumbnails.timer <<'EOF'
+[Unit]
+Description=Generate pending image thumbnails every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
-systemctl enable --now mmftp-web mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer
+systemctl enable --now mmftp-web mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer mmftp-thumbnails.timer
 sleep 6
 
 # ---- done --------------------------------------------------------------------
 log "STATUS"
-systemctl is-active postgresql redis-server minio nginx mmftp-web || true
+systemctl is-active postgresql minio nginx mmftp-web || true
 systemctl list-timers 'mmftp-*' --no-pager || true
 echo
 curl -s -o /dev/null -w "  health via nginx (80): HTTP %{http_code}\n" "http://127.0.0.1/healthz" || true

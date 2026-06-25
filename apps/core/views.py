@@ -29,8 +29,8 @@ def _paginate(request, queryset, per_page=50):
 
 @require_GET
 def healthz(request):
-    """Liveness/readiness probe — checks DB and Redis connectivity."""
-    checks = {"database": "ok", "redis": "ok"}
+    """Liveness/readiness probe — checks DB and cache connectivity."""
+    checks = {"database": "ok", "cache": "ok"}
     status = 200
 
     try:
@@ -46,7 +46,7 @@ def healthz(request):
         if cache.get("healthz") != "1":
             raise RuntimeError("cache round-trip failed")
     except Exception as exc:  # noqa: BLE001
-        checks["redis"] = f"error: {exc.__class__.__name__}"
+        checks["cache"] = f"error: {exc.__class__.__name__}"
         status = 503
 
     return JsonResponse({"status": "ok" if status == 200 else "degraded", **checks}, status=status)

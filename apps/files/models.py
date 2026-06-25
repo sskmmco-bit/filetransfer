@@ -68,6 +68,10 @@ class StoredFile(models.Model):
     temp_key = models.CharField(max_length=512, blank=True)
     storage_key = models.CharField(max_length=512, blank=True)
     thumbnail_key = models.CharField(max_length=512, blank=True)
+    # Number of thumbnail-generation attempts. The async generate_pending_thumbnails
+    # job stops retrying an image once this exceeds its cap (a permanently-bad image
+    # shouldn't be reprocessed on every tick). 0 = not yet attempted.
+    thumbnail_attempts = models.PositiveSmallIntegerField(default=0)
 
     # Metadata (collected in Step 2).
     title = models.CharField(max_length=255, blank=True)
@@ -138,6 +142,19 @@ class StoredFile(models.Model):
                 name="file_title_trgm",
                 fields=["title"],
                 opclasses=["gin_trgm_ops"],
+            ),
+            # Partial indexes for the daily purge job's predicates (retention +
+            # per-file expiry). Partial on status=ACTIVE keeps them tiny — they
+            # only cover live files, which is all the purge scans.
+            models.Index(
+                name="file_active_uploaded_at",
+                fields=["uploaded_at"],
+                condition=models.Q(status=FileStatus.ACTIVE),
+            ),
+            models.Index(
+                name="file_active_expiry_date",
+                fields=["expiry_date"],
+                condition=models.Q(status=FileStatus.ACTIVE),
             ),
         ]
 

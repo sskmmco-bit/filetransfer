@@ -107,17 +107,16 @@ DATABASES = {
 }
 
 # ---------------------------------------------------------------------------
-# Cache (Redis)
+# Cache (local in-process — no Redis)
 # ---------------------------------------------------------------------------
-# Background jobs run as management commands on systemd timers (no Celery/broker);
-# Redis is used only as the Django cache backend.
-REDIS_URL = env("REDIS_URL", default="redis://redis:6379/0")
-
+# Background jobs run as management commands on systemd timers (no Celery/broker)
+# and the app has no cross-process cache needs (login throttle is DB-backed,
+# sessions use the database), so the default cache is Django's in-memory
+# LocMemCache. No external cache service is required.
 CACHES = {
     "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": REDIS_URL,
-        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "mmftp-default",
     }
 }
 

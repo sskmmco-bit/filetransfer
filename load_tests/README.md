@@ -42,7 +42,7 @@ Point `--host` at the server: `http://<server>/` exercises the **full edge**
 through nginx, while `http://<server>:8000` (if Gunicorn's port is reachable)
 hits the app tier directly.
 
-> Hitting Gunicorn directly isolates app capacity (DB, Redis, Django, worker
+> Hitting Gunicorn directly isolates app capacity (DB, Django, worker
 > count) — usually what you want to measure. nginx adds
 > proxying/buffering/keepalive but is rarely the bottleneck for dynamic
 > requests. Test through nginx when you specifically want to validate the

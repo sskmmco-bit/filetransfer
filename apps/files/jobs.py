@@ -2,11 +2,14 @@
 
 Formerly Celery tasks; now plain functions:
 
-generate_thumbnail   — image thumbnailing, called synchronously on activation
-                       (apps.files.services). Best-effort: failures are logged and
-                       never block activation. Sources larger than
-                       THUMBNAIL_MAX_SOURCE_BYTES are skipped so a huge image can't
-                       stall the request thread.
+generate_thumbnail   — thumbnail one image. Best-effort: failures are logged and
+                       bump thumbnail_attempts (so a bad image isn't retried
+                       forever). Sources larger than THUMBNAIL_MAX_SOURCE_BYTES are
+                       skipped.
+generate_pending_thumbnails — async batch run by the generate_pending_thumbnails
+                       management command (systemd timer ~2 min): finds active
+                       images with no thumbnail yet and generates them OFF the
+                       request thread (activation no longer blocks on this).
 purge_expired_files  — daily cleanup, run by the purge_expired_files management
                        command: retention + per-file expiry soft-deletes,
                        abandoned-upload hard-delete + temp cleanup, and a CronLog.
@@ -21,9 +24,12 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 THUMBNAIL_SIZE = (320, 320)
-# Skip thumbnailing originals larger than this — generation runs inline on the
-# request thread (no Celery worker), so a huge image would stall the response.
+# Skip thumbnailing originals larger than this (decode cost / memory on a small box).
 THUMBNAIL_MAX_SOURCE_BYTES = 25 * 1024 * 1024  # 25 MiB
+# Stop retrying an image after this many failed generation attempts.
+THUMBNAIL_MAX_ATTEMPTS = 3
+# Max images one generate_pending_thumbnails tick processes (bounds a single run).
+THUMBNAIL_BATCH_LIMIT = 25
 
 
 def generate_thumbnail(stored_file_id: int) -> dict:
@@ -59,8 +65,53 @@ def generate_thumbnail(stored_file_id: int) -> dict:
         sf.save(update_fields=["thumbnail_key", "updated_at"])
         return {"thumbnail": True, "key": thumb_key}
     except Exception as exc:  # noqa: BLE001 — thumbnailing is best-effort
-        logger.warning("generate_thumbnail failed for %s: %s", stored_file_id, exc)
+        # Count the failed attempt so a permanently-bad image stops being retried.
+        sf.thumbnail_attempts = (sf.thumbnail_attempts or 0) + 1
+        sf.save(update_fields=["thumbnail_attempts", "updated_at"])
+        logger.warning("generate_thumbnail failed for %s (attempt %s): %s",
+                       stored_file_id, sf.thumbnail_attempts, exc)
         return {"thumbnail": False, "reason": str(exc)}
+
+
+def generate_pending_thumbnails(limit: int = THUMBNAIL_BATCH_LIMIT) -> dict:
+    """Generate thumbnails for active images that don't have one yet (§5.8).
+
+    Runs off the request thread on a systemd timer. Picks active image files with
+    an empty thumbnail_key, within the size cap, and under the attempt cap, then
+    thumbnails each. Writes a CronLog only when it actually processed something.
+    """
+    from apps.audit.models import CronLog
+    from .models import FileStatus, StoredFile
+
+    started = timezone.now()
+    pending = (
+        StoredFile.objects.filter(
+            status=FileStatus.ACTIVE,
+            content_type__startswith="image/",
+            thumbnail_key="",
+            thumbnail_attempts__lt=THUMBNAIL_MAX_ATTEMPTS,
+        )
+        .exclude(size__gt=THUMBNAIL_MAX_SOURCE_BYTES)
+        .order_by("uploaded_at")
+    )
+    ids = list(pending.values_list("pk", flat=True)[:limit])
+
+    generated = 0
+    for pk in ids:
+        if generate_thumbnail(pk).get("thumbnail"):
+            generated += 1
+
+    if ids:
+        CronLog.objects.create(
+            task_name="generate_pending_thumbnails",
+            processed_count=len(ids),
+            deleted_count=0,
+            started_at=started,
+            finished_at=timezone.now(),
+            note=f"generated={generated}",
+        )
+    logger.info("generate_pending_thumbnails: processed=%s generated=%s", len(ids), generated)
+    return {"processed": len(ids), "generated": generated}
 
 
 def purge_expired_files() -> dict:

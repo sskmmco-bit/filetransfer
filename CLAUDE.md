@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-MMFileTransfer (`mmftp`) — an internal file-transfer web app. Django 5.1 + Gunicorn behind nginx, PostgreSQL, MinIO (S3-compatible object storage), Redis (Django cache). Background work runs as Django management commands fired by **systemd timers** (no Celery/broker). Runs directly on a Linux host (no Docker): Postgres, Redis, and nginx as OS packages; MinIO and Gunicorn as `systemd` units, plus the job timers. English-only, unified user model (no separate client vs. staff accounts).
+MMFileTransfer (`mmftp`) — an internal file-transfer web app. Django 5.1 + Gunicorn behind nginx, PostgreSQL, MinIO (S3-compatible object storage). The Django cache is in-process (`LocMemCache`) — no Redis. Background work runs as Django management commands fired by **systemd timers** (no Celery/broker). Runs directly on a Linux host (no Docker): Postgres and nginx as OS packages; MinIO and Gunicorn as `systemd` units, plus the job timers. English-only, unified user model (no separate client vs. staff accounts).
 
 `ROADMAP.md` is the source of truth for status: **v1 core (Phases 0–5) is complete and verified** — users/roles/auth/LDAP/audit, two-step uploads to MinIO, authorized + public downloads, notifications, admin console, retention/expiry. Phase 6 (2FA, encryption-at-rest) and Phase 7 (hardening) are not started. `MMFileTransfer_Flows_v2.pdf` is the spec; code comments reference its section numbers (e.g. §5.8).
 
@@ -34,7 +34,7 @@ The change-log file should record what was actually changed (files, DB migration
 
 ## Commands
 
-Local development (Postgres, Redis, and MinIO must be running on the host — see
+Local development (Postgres and MinIO must be running — via `docker compose -f docker-compose.dev.yml up -d` locally, or on the host; no Redis — see
 `deploy/INSTALL_NO_DOCKER.md` for installing them). Create a venv, install deps,
 and point `.env` at the local services:
 ```bash
@@ -47,9 +47,10 @@ python manage.py collectstatic --noinput
 python manage.py createsuperuser
 python manage.py runserver                  # dev autoreload
 # Background jobs are management commands — run them on demand in dev:
-python manage.py send_queued_notifications  # drain the deferred-email queue
-python manage.py purge_expired_files        # retention/expiry/abandoned cleanup
-python manage.py send_expiry_reminders      # queue expiry reminders
+python manage.py send_queued_notifications    # drain the deferred-email queue
+python manage.py purge_expired_files          # retention/expiry/abandoned cleanup
+python manage.py send_expiry_reminders        # queue expiry reminders
+python manage.py generate_pending_thumbnails  # thumbnail new images (async on a timer in prod)
 ```
 
 Production-like (Gunicorn + nginx on :80, `DEBUG=False`): the web app runs as the
@@ -77,7 +78,7 @@ sudo systemctl start mmftp-notifications.service  # run a job now (don't wait fo
 journalctl -u mmftp-notifications -n 50           # that run's output
 ```
 
-Key URLs: `/` dashboard, `/accounts/login/` (employee ID / email / username), `/admin/` Django admin, `/console/` in-app admin console, `/healthz` (DB + Redis probe), MinIO console at `:9001`.
+Key URLs: `/` dashboard, `/accounts/login/` (employee ID / email / username), `/admin/` Django admin, `/console/` in-app admin console, `/healthz` (DB + cache probe), MinIO console at `:9001`.
 
 **There is no automated test suite** — no pytest/conftest, no `tests.py`. Phases were verified manually against a running stack. If you add tests, you are establishing the convention.
 
@@ -95,7 +96,7 @@ Key URLs: `/` dashboard, `/accounts/login/` (employee ID / email / username), `/
 ### Domain logic lives in services, not views
 `apps/files/services.py` holds the transactional core. Views are thin; they call these functions. When changing file behavior, edit services here, not the views:
 - `complete_transfer(session)` — assemble + validate uploaded bytes (single-pass SHA-256 + magic-byte sniff + policy), move to `pending_metadata`.
-- `activate_file(...)` — copy temp→final key, create assignments, mint public token, generate the thumbnail inline + queue notification emails. **Row-locked and idempotent** (a retried activation never double-copies or double-emails).
+- `activate_file(...)` — copy temp→final key, create assignments, mint public token, queue notification emails (thumbnailing is deferred to the `generate_pending_thumbnails` timer, not done here). **Row-locked and idempotent** (a retried activation never double-copies or double-emails).
 - `add_recipients`, `reserve_download_slot` (atomic limit enforcement), `soft_delete_stored_file`, `ensure_public_token` / `disable_public_link`.
 
 ### File lifecycle (explicit state machine)
@@ -126,14 +127,15 @@ Background work is plain functions in each app's `jobs.py`, invoked either inlin
 - `send_queued_notifications` (timer ~2 min) — drains the deferred-email queue. It **claims** `NotificationLog` rows under a short `select_for_update(skip_locked=True)` lock (status→`sending` + `claimed_at`), then sends SMTP **outside** the lock; overlap-safe. A row stuck in `sending` past `NOTIFICATION_CLAIM_STALE_MINUTES` (15) is re-claimed; failures retry each run up to `MAX_RETRIES` then `failed`. Logic in `apps/notifications/jobs.py`.
 - `purge_expired_files` (daily) — retention + expiry + abandoned-upload cleanup, writes `CronLog`. Logic in `apps/files/jobs.py`.
 - `send_expiry_reminders` (daily) — queues expiry reminders.
+- `generate_pending_thumbnails` (timer ~2 min) — thumbnails active images that have no `thumbnail_key` yet, off the request thread; bumps `thumbnail_attempts` and stops after `THUMBNAIL_MAX_ATTEMPTS` (3). Logic in `apps/files/jobs.py`.
 
-Email has two paths: **inline transactional** (`notifications/email.py`, never queued — used for public verification codes) and **deferred** (queued in `NotificationLog`, drained by the timer, at-most-once via `idempotency_key`). The SMTP connection carries a 30 s timeout that must stay below the claim stale bound so a slow-but-live send can't be re-claimed and double-sent. Thumbnails are generated **inline** on activation (no job).
+Email has two paths: **inline transactional** (`notifications/email.py`, never queued — used for public verification codes) and **deferred** (queued in `NotificationLog`, drained by the timer, at-most-once via `idempotency_key`). The SMTP connection carries a 30 s timeout that must stay below the claim stale bound so a slow-but-live send can't be re-claimed and double-sent. Thumbnails are generated **asynchronously** by the `generate_pending_thumbnails` timer (not inline on activation).
 
 ## Gotchas
 
 - **Migrations must be generated and committed** — run `makemigrations` locally and commit the files. A server install applies committed migrations only; it does not generate them (the `.env` sets `DJANGO_SKIP_MAKEMIGRATIONS=1`).
 - **Background jobs pick up code changes automatically** — the systemd timers re-exec `manage.py` each run, so no restart is needed after editing `jobs.py` or a command (unlike the old Celery worker/beat). Only `mmftp-web` (Gunicorn) needs a restart on a server.
-- **Thumbnails are generated synchronously on activation** (`apps/files/jobs.generate_thumbnail`, called inline from `services._enqueue_post_activation`) — it adds latency to image activations and runs on the request thread; sources over `THUMBNAIL_MAX_SOURCE_BYTES` (25 MiB) are skipped.
+- **Thumbnails are generated asynchronously** by the `generate_pending_thumbnails` job (systemd timer ~2 min), so a new image's thumbnail appears within a minute or two of activation (the UI's `<img onerror>` falls back to an extension chip until then). `activate_file`/`_enqueue_post_activation` no longer block on thumbnailing. Sources over `THUMBNAIL_MAX_SOURCE_BYTES` (25 MiB) are skipped; permanently-failing images stop after `THUMBNAIL_MAX_ATTEMPTS` (3).
 - `ldap3` and `cryptography` are imported lazily; the app runs without them until an LDAP-auth or encrypted-secret path executes. (A corporate TLS-intercepting proxy has historically blocked installing these via pip — see ROADMAP Phase 1.)
 - `SECRETS_ENCRYPTION_KEY` is empty by default; generate one before wiring real SMTP/LDAP secrets: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
 - Content policy is currently a **disallowed-extension blocklist** (empty by default — all types accepted, executables included); tighten `DISALLOWED_EXTENSIONS` in `services.py` per deployment.

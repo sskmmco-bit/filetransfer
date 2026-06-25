@@ -76,7 +76,7 @@ mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
   cat >/etc/systemd/system/$1.service <<EOF
 [Unit]
 Description=$2
-After=network.target postgresql.service redis-server.service minio.service
+After=network.target postgresql.service minio.service
 OnFailure=mmftp-onfailure@%n.service
 
 [Service]
@@ -91,6 +91,7 @@ EOF
 mk_job mmftp-notifications "MMFileTransfer deferred-email drain"  "send_queued_notifications"
 mk_job mmftp-purge         "MMFileTransfer daily purge/expiry"    "purge_expired_files"
 mk_job mmftp-reminders     "MMFileTransfer daily expiry reminders" "send_expiry_reminders"
+mk_job mmftp-thumbnails    "MMFileTransfer pending-thumbnail generation" "generate_pending_thumbnails"
 
 cat >/etc/systemd/system/mmftp-notifications.timer <<'EOF'
 [Unit]
@@ -129,12 +130,94 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+cat >/etc/systemd/system/mmftp-thumbnails.timer <<'EOF'
+[Unit]
+Description=Generate pending image thumbnails every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# ---- 4b. refresh web unit, nginx config, and PG tuning (idempotent) ---------
+# Re-applied every update so config-tier perf changes (Gunicorn --preload,
+# nginx /static/ + gzip, PostgreSQL tuning) reach existing installs.
+log "Refreshing web unit + nginx + PostgreSQL tuning"
+cat >/etc/systemd/system/mmftp-web.service <<EOF
+[Unit]
+Description=MMFileTransfer web (Gunicorn)
+After=network.target postgresql.service minio.service
+
+[Service]
+User=www-data
+WorkingDirectory=$APP
+EnvironmentFile=$ENVF
+ExecStart=$VENV/bin/gunicorn mmftp.wsgi:application --bind 127.0.0.1:8000 --workers 3 --threads 3 --preload --max-requests 1000 --max-requests-jitter 200 --timeout 600
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat >/etc/nginx/sites-available/mmftp <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+
+    client_max_body_size 64m;
+    proxy_read_timeout    3600s;
+    proxy_send_timeout    3600s;
+
+    gzip on;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    location /static/ {
+        alias APP_PATH/staticfiles/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    location /mmftp-files/ {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_set_header Host $host;
+    }
+}
+EOF
+sed -i "s#APP_PATH#$APP#g" /etc/nginx/sites-available/mmftp
+ln -sf /etc/nginx/sites-available/mmftp /etc/nginx/sites-enabled/mmftp
+nginx -t && systemctl reload nginx || log "nginx config test failed — left previous config running"
+
+PG_CONFD="$(find /etc/postgresql -maxdepth 3 -type d -name conf.d 2>/dev/null | head -n1)"
+if [[ -n "$PG_CONFD" ]]; then
+  install -m 644 "$SCRIPT_DIR/postgresql.tuning.conf" "$PG_CONFD/10-mmftp-tuning.conf"
+  systemctl restart postgresql
+  log "  applied $PG_CONFD/10-mmftp-tuning.conf"
+fi
+
 # ---- 5. fix ownership + restart/enable services -----------------------------
 log "Restarting services"
 chown -R www-data:www-data "$APP" "$VENV"
 systemctl daemon-reload
 systemctl restart mmftp-web
-systemctl enable --now mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer
+systemctl enable --now mmftp-notifications.timer mmftp-purge.timer mmftp-reminders.timer mmftp-thumbnails.timer
 sleep 4
 
 log "STATUS"
