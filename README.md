@@ -2,8 +2,9 @@
 
 Internal file-transfer application — **Phase 0 / Phase 1 starter scaffold**.
 
-Stack: **Django 5 + Gunicorn**, **nginx** reverse proxy, **PostgreSQL**, **MinIO**
-(S3-compatible object storage). The Django cache is in-process (no Redis).
+Stack: **Django 5 + Gunicorn**, **nginx** reverse proxy, **PostgreSQL**, and
+**local-disk file storage** (file blobs live on the app host under
+`FILE_STORAGE_ROOT`; no MinIO/S3). The Django cache is in-process (no Redis).
 Background jobs run as Django management commands on **systemd timers** (no Celery).
 Runs directly on a Linux host — **no Docker**.
 
@@ -11,11 +12,12 @@ Runs directly on a Linux host — **no Docker**.
 
 ## Quick start (development)
 
-You need PostgreSQL and MinIO running first (no Redis). For local dev on
-Windows/macOS the easiest way is the dev compose file:
+You only need PostgreSQL running first (no Redis, no MinIO — file blobs go to a
+local directory). For local dev on Windows/macOS the easiest way is the dev
+compose file:
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d   # Postgres + MinIO + bucket
+docker compose -f docker-compose.dev.yml up -d   # Postgres
 ```
 
 For a server, install them as host services — see
@@ -48,8 +50,7 @@ Once it's up:
 | http://localhost:8000/ | Dashboard (redirects to login) |
 | http://localhost:8000/accounts/login/ | Login — accepts employee ID, email, **or** username |
 | http://localhost:8000/admin/ | Django admin |
-| http://localhost:8000/healthz | JSON health probe (checks DB + cache) |
-| http://localhost:9001/ | MinIO console |
+| http://localhost:8000/healthz | JSON health probe (checks DB + cache + storage) |
 
 ## Production-like run
 
@@ -113,19 +114,19 @@ deploy/                no-Docker install guide, installer scripts, nginx + env t
 - **Multi-identifier login** — resolves employee ID / email / username, local-wins (§5.7.1a).
 - Dashboard shell with placeholder widgets, login-gated.
 - `SiteSettings` singleton with general + retention fields.
-- Settings fully wired for PostgreSQL, in-process cache, and MinIO object storage
-  (presigned URLs, private bucket).
+- Settings fully wired for PostgreSQL, in-process cache, and local-disk file
+  storage (served via nginx X-Accel-Redirect / Django FileResponse).
 - `get_client_ip()`-ready proxy settings (`TRUSTED_PROXY_IPS`, `SECURE_PROXY_SSL_HEADER`).
 - Background jobs as management commands on systemd timers (`send_queued_notifications`,
   `purge_expired_files`, `send_expiry_reminders`) — no Celery/broker.
-- Health endpoint that checks DB and cache.
+- Health endpoint that checks DB, cache, and the blob store.
 
 ## What's intentionally deferred (next steps from the plan)
 
 - Full **Role / Permission / RolePermission** tables and the permission matrix (§2.4, §5.7.4).
 - **LDAP** auth + JIT provisioning (§5.7), 2FA (§5.17), password reset + throttling (§5.9).
 - Audit models + `get_client_ip()` helper (§5.14, §5.15, §3).
-- `files` app: two-step upload to MinIO, `StoredFile`/`UploadSession`/`FileAssignment` (§5.5, §5.8).
+- `files` app: two-step upload to local disk, `StoredFile`/`UploadSession`/`FileAssignment` (§5.5, §5.8).
 - `public` app: token links + email-verified download (§5.4).
 - Deferred email delivery + templates (Phase 4) and the real retention/expiry purge (§5.6.2).
 
@@ -135,5 +136,6 @@ deploy/                no-Docker install guide, installer scripts, nginx + env t
   A server install applies committed migrations only — it does not generate them.
 - `SECRETS_ENCRYPTION_KEY` is empty by default. Generate one before wiring SMTP/LDAP:
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-- Static files are served by WhiteNoise (and nginx in prod). File blobs go to MinIO;
-  downloads will use short-lived presigned URLs (Phase 3).
+- Static files are served by WhiteNoise (and nginx in prod). File blobs live on
+  local disk (`FILE_STORAGE_ROOT`); downloads are authorized by the app and
+  served via nginx `X-Accel-Redirect` (prod) or Django `FileResponse` (dev).

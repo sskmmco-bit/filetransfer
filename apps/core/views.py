@@ -29,8 +29,8 @@ def _paginate(request, queryset, per_page=50):
 
 @require_GET
 def healthz(request):
-    """Liveness/readiness probe — checks DB and cache connectivity."""
-    checks = {"database": "ok", "cache": "ok"}
+    """Liveness/readiness probe — checks DB, cache, and the blob store."""
+    checks = {"database": "ok", "cache": "ok", "storage": "ok"}
     status = 200
 
     try:
@@ -47,6 +47,20 @@ def healthz(request):
             raise RuntimeError("cache round-trip failed")
     except Exception as exc:  # noqa: BLE001
         checks["cache"] = f"error: {exc.__class__.__name__}"
+        status = 503
+
+    # Blob store: the local storage root must exist and be writable.
+    try:
+        import os
+
+        from django.conf import settings
+
+        root = str(settings.FILE_STORAGE_ROOT)
+        os.makedirs(root, exist_ok=True)
+        if not os.access(root, os.W_OK):
+            raise RuntimeError("storage root not writable")
+    except Exception as exc:  # noqa: BLE001
+        checks["storage"] = f"error: {exc.__class__.__name__}"
         status = 503
 
     return JsonResponse({"status": "ok" if status == 200 else "degraded", **checks}, status=status)

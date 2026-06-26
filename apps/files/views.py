@@ -3,12 +3,14 @@
 Step 1 transport is dual-path:
   * direct  — a single multipart POST for files <= 50 MiB (files:upload).
   * chunked — JSON endpoints files:init_upload -> files:upload_chunk (xN) ->
-              files:upload_complete, mapped onto a MinIO multipart upload.
+              files:upload_complete; parts are appended to a single temp file
+              on local disk (see apps/files/storage.py).
 Either way the bytes land in a temp key; complete_transfer() validates and moves
 the file to pending_metadata. Step 2 (files:edit) saves metadata and activates.
 
-Download mints a short-lived presigned MinIO URL; full download-limit/public
-logic is finished in Phase 3.
+Download/preview/thumb stream the bytes from local disk (nginx X-Accel-Redirect
+in production, FileResponse in dev) after the view authorizes the request; full
+download-limit/public logic is finished in Phase 3.
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
-from django.http import Http404, HttpResponseRedirect, JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -173,8 +175,11 @@ def upload_chunk(request):
             {"part_number": int(client_pn), "received": session.received_size, "duplicate": True}
         )
 
+    # Pass the committed byte offset so a re-sent/interrupted part overwrites any
+    # partial tail instead of appending duplicate bytes (resume-safe).
     etag = storage.upload_part(
-        session.stored_file.temp_key, session.multipart_upload_id, expected, chunk.read()
+        session.stored_file.temp_key, session.multipart_upload_id, expected,
+        chunk.read(), offset=session.received_size,
     )
     session.parts.append({"PartNumber": expected, "ETag": etag})
     session.received_size += chunk.size
@@ -702,19 +707,45 @@ def group_space(request, pk):
     return _remember_view(request, resp)
 
 
+# Extension -> preview kind, used as a fallback when the stored content_type is
+# missing or generic (e.g. application/octet-stream when libmagic is unavailable).
+_PREVIEW_EXT = {
+    "image": {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico",
+              "tif", "tiff", "avif"},
+    "pdf": {"pdf"},
+    "video": {"mp4", "webm", "ogv", "mov", "m4v"},
+    "audio": {"mp3", "wav", "ogg", "oga", "m4a", "aac", "flac"},
+    "text": {"txt", "csv", "json", "xml", "md", "log", "ini", "yml", "yaml",
+             "py", "js", "ts", "html", "htm", "css", "sh", "sql", "c", "cpp",
+             "h", "java", "go", "rb", "rs"},
+}
+
+
 def preview_kind(content_type: str, filename: str) -> str:
-    """Which inline preview the browser can render (else 'none')."""
+    """Which inline preview the browser can render (else 'none').
+
+    Prefers the content_type; when that is missing or generic
+    (application/octet-stream), falls back to the filename extension so files
+    still preview even if magic-byte sniffing was unavailable at upload time.
+    """
     ct = (content_type or "").lower()
-    if ct.startswith("image/"):
-        return "image"
-    if ct == "application/pdf":
-        return "pdf"
-    if ct.startswith("video/"):
-        return "video"
-    if ct.startswith("audio/"):
-        return "audio"
-    if ct.startswith("text/") or ct in ("application/json", "application/xml", "text/csv"):
-        return "text"
+    if ct and ct != "application/octet-stream":
+        if ct.startswith("image/"):
+            return "image"
+        if ct == "application/pdf":
+            return "pdf"
+        if ct.startswith("video/"):
+            return "video"
+        if ct.startswith("audio/"):
+            return "audio"
+        if ct.startswith("text/") or ct in ("application/json", "application/xml", "text/csv"):
+            return "text"
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+    if ext:
+        for kind, exts in _PREVIEW_EXT.items():
+            if ext in exts:
+                return kind
     return "none"
 
 
@@ -750,10 +781,9 @@ def detail(request, uuid):
     kind = preview_kind(sf.content_type, sf.original_filename) if obj_key else "none"
     preview_url = ""
     if kind != "none":
-        preview_url = storage.presigned_get_url(
-            obj_key, download_name=sf.original_filename,
-            inline=True, content_type=sf.content_type,
-        )
+        # Point the browser at the authenticated streaming endpoint; it serves
+        # the bytes inline (no presigned URL on local-disk storage).
+        preview_url = reverse("files:preview", kwargs={"uuid": sf.uuid})
     # Owner can still open/download a non-previewable draft to review it.
     can_review = is_owner and bool(obj_key)
 
@@ -803,7 +833,7 @@ def _share_context(sf, owner):
 @login_required
 @require_GET
 def preview(request, uuid):
-    """Authorize, then redirect to an inline presigned URL (open in new tab).
+    """Authorize, then stream the file inline (open in new tab).
 
     Works for ACTIVE files and for the owner's PENDING_METADATA draft (served
     from its temp_key) so a file can be reviewed before metadata is completed.
@@ -817,11 +847,10 @@ def preview(request, uuid):
     obj_key = _preview_object_key(sf)
     if not obj_key:
         raise Http404("Nothing to preview.")
-    url = storage.presigned_get_url(
+    return storage.serve(
         obj_key, download_name=sf.original_filename,
         inline=True, content_type=sf.content_type,
     )
-    return HttpResponseRedirect(url)
 
 
 @login_required
@@ -837,14 +866,14 @@ def thumb(request, uuid):
     if sf.status != FileStatus.ACTIVE or not _can_access(sf, request.user):
         raise Http404("No thumbnail.")
     if sf.thumbnail_key:
-        return HttpResponseRedirect(storage.presigned_get_url(
+        return storage.serve(
             sf.thumbnail_key, download_name="thumb.jpg", inline=True, content_type="image/jpeg"
-        ))
+        )
     if preview_kind(sf.content_type, sf.original_filename) == "image":
-        return HttpResponseRedirect(storage.presigned_get_url(
+        return storage.serve(
             sf.storage_key, download_name=sf.original_filename,
             inline=True, content_type=sf.content_type,
-        ))
+        )
     raise Http404("No thumbnail.")
 
 
@@ -860,8 +889,8 @@ def _can_access(sf, user) -> bool:
 @login_required
 @require_GET
 def download(request, uuid):
-    """Authorize, reserve a slot, record the event, then redirect to a
-    short-lived presigned MinIO URL (§5.4, §5.10)."""
+    """Authorize, reserve a slot, record the event, then stream the file
+    as an attachment (§5.4, §5.10)."""
     _require(request, "files.download")
     sf = get_object_or_404(StoredFile, uuid=uuid, status=FileStatus.ACTIVE)
     if not _can_access(sf, request.user):
@@ -881,8 +910,8 @@ def download(request, uuid):
 
     log_activity(request.user, ActivityAction.DOWNLOAD, f"Downloaded '{sf.display_name}'",
                  get_client_ip(request), request.META.get("HTTP_USER_AGENT", ""))
-    url = storage.presigned_get_url(sf.storage_key, download_name=sf.original_filename)
-    return HttpResponseRedirect(url)
+    return storage.serve(sf.storage_key, download_name=sf.original_filename,
+                         content_type=sf.content_type)
 
 
 # ---------------------------------------------------------------------------
@@ -906,10 +935,11 @@ def _parse_link_settings(src):
     raw_limit = src.get("download_limit")
     download_limit = int(raw_limit) if raw_limit not in (None, "", False) else None
 
-    # password: explicit clear flag wins; else a value sets it; else leave (KEEP).
+    # password: explicit clear flag wins; else a non-blank value sets it; else
+    # leave (KEEP). A whitespace-only value is treated as blank — never stored.
     if truthy(src.get("clear_password")):
         password = ""
-    elif src.get("password"):
+    elif (src.get("password") or "").strip():
         password = src["password"]
     else:
         password = sharelinks.KEEP

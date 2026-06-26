@@ -1,8 +1,9 @@
-"""Import orphaned MinIO objects (§ Phase 5).
+"""Import orphaned blobs from local disk (§ Phase 5).
 
-Scans the bucket under the `files/` prefix and creates a StoredFile record for
-any object that no StoredFile currently references — e.g. files restored from a
-backup or left behind by a previous system. Assigns them to a SuperAdmin owner.
+Walks FILE_STORAGE_ROOT under the `files/` prefix and creates a StoredFile
+record for any blob that no StoredFile currently references — e.g. files
+restored from a backup or left behind by a previous system. Assigns them to a
+SuperAdmin owner.
 
 Usage:
     python manage.py import_orphans --dry-run
@@ -10,19 +11,21 @@ Usage:
 """
 from __future__ import annotations
 
+import os
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from apps.accounts.models import RoleSlug
-from apps.files import storage
 from apps.files.models import FileStatus, StoredFile
 
 User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = "Create StoredFile records for MinIO objects under files/ that are untracked."
+    help = "Create StoredFile records for on-disk blobs under files/ that are untracked."
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="List orphans without importing.")
@@ -34,18 +37,19 @@ class Command(BaseCommand):
             StoredFile.objects.exclude(storage_key="").values_list("storage_key", flat=True)
         )
 
-        client = storage.get_client()
-        paginator = client.get_paginator("list_objects_v2")
+        root = os.path.realpath(str(settings.FILE_STORAGE_ROOT))
+        files_dir = os.path.join(root, "files")
         created = 0
         scanned = 0
-        for page in paginator.paginate(Bucket=storage.bucket(), Prefix="files/"):
-            for obj in page.get("Contents", []):
+        for dirpath, _dirnames, filenames in os.walk(files_dir):
+            for fname in filenames:
                 scanned += 1
-                key = obj["Key"]
+                abspath = os.path.join(dirpath, fname)
+                # Key is the path relative to the storage root, POSIX-style.
+                key = os.path.relpath(abspath, root).replace(os.sep, "/")
                 if key in known:
                     continue
-                tail = key.rsplit("/", 1)[-1]
-                name = tail.split("-", 1)[-1] if "-" in tail else tail
+                name = fname.split("-", 1)[-1] if "-" in fname else fname
                 if opts["dry_run"]:
                     self.stdout.write(f"  orphan: {key}")
                     continue
@@ -53,7 +57,7 @@ class Command(BaseCommand):
                     owner=owner,
                     original_filename=name[:255],
                     storage_key=key,
-                    size=obj.get("Size", 0),
+                    size=os.path.getsize(abspath),
                     status=FileStatus.ACTIVE,
                     uploaded_at=timezone.now(),
                     title=name,
@@ -61,7 +65,7 @@ class Command(BaseCommand):
                 created += 1
 
         self.stdout.write(self.style.SUCCESS(
-            f"Scanned {scanned} object(s); "
+            f"Scanned {scanned} blob(s); "
             + ("dry run — nothing imported." if opts["dry_run"] else f"imported {created} orphan(s).")
         ))
 

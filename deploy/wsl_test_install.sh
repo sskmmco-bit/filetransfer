@@ -19,12 +19,10 @@ APP_SRC=/mnt/c/mm_projects/mmftp           # the Windows repo (source code)
 BASE=/opt/mmftp
 APP=$BASE/app
 VENV=$BASE/venv
-DATA=$BASE/minio-data
+FILES=$BASE/files          # local file-blob store (FILE_STORAGE_ROOT)
 ENVF=$BASE/.env
 
 DB_PASS=mmftp_test_db_pass
-MINIO_KEY=mmftpadmin
-MINIO_SECRET=mmftp_test_minio_pass
 ADMIN_USER=admin
 ADMIN_EMAIL=admin@mm.co.in
 ADMIN_PASS=adminpass123
@@ -46,7 +44,7 @@ systemctl enable --now postgresql
 
 # ---- STEP 2: folders + copy code --------------------------------------------
 log "STEP 2  lay out /opt/mmftp and copy the code"
-mkdir -p "$APP" "$DATA"
+mkdir -p "$APP" "$FILES"
 rsync -a --delete \
   --exclude '.git' --exclude '.env' --exclude 'venv' \
   --exclude 'staticfiles' --exclude '__pycache__' --exclude '*.pyc' \
@@ -67,32 +65,11 @@ sudo -u postgres psql -c "ALTER USER mmftp WITH PASSWORD '$DB_PASS';"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='mmftp'" | grep -q 1 \
   || sudo -u postgres psql -c "CREATE DATABASE mmftp OWNER mmftp;"
 
-# ---- STEP 5: MinIO -----------------------------------------------------------
-log "STEP 5  MinIO binary + service + bucket"
-[[ -x /usr/local/bin/minio ]] || { curl -fL https://dl.min.io/server/minio/release/linux-amd64/minio -o /usr/local/bin/minio; chmod +x /usr/local/bin/minio; }
-[[ -x /usr/local/bin/mc    ]] || { curl -fL https://dl.min.io/client/mc/release/linux-amd64/mc       -o /usr/local/bin/mc;    chmod +x /usr/local/bin/mc; }
-
-cat >/etc/systemd/system/minio.service <<EOF
-[Unit]
-Description=MinIO object storage
-After=network.target
-
-[Service]
-User=root
-Environment=MINIO_ROOT_USER=$MINIO_KEY
-Environment=MINIO_ROOT_PASSWORD=$MINIO_SECRET
-ExecStart=/usr/local/bin/minio server $DATA --address 127.0.0.1:9000 --console-address 127.0.0.1:9001
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now minio
-sleep 5
-/usr/local/bin/mc alias set local http://127.0.0.1:9000 "$MINIO_KEY" "$MINIO_SECRET"
-/usr/local/bin/mc mb --ignore-existing local/mmftp-files
+# ---- STEP 5: local file-blob store ------------------------------------------
+log "STEP 5  local file-blob store at $FILES"
+mkdir -p "$FILES"
+chown -R www-data:www-data "$FILES"
+chmod 750 "$FILES"
 
 # ---- STEP 6: .env ------------------------------------------------------------
 log "STEP 6  write $ENVF"
@@ -114,13 +91,9 @@ POSTGRES_USER=mmftp
 POSTGRES_PASSWORD=$DB_PASS
 POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=5432
-MINIO_ENDPOINT_URL=http://127.0.0.1:9000
-MINIO_PUBLIC_ENDPOINT_URL=http://localhost
-MINIO_BUCKET=mmftp-files
-MINIO_ACCESS_KEY=$MINIO_KEY
-MINIO_SECRET_KEY=$MINIO_SECRET
-MINIO_USE_SSL=False
-MINIO_REGION=us-east-1
+FILE_STORAGE_ROOT=$FILES
+FILE_STORAGE_USE_X_ACCEL=True
+FILE_STORAGE_X_ACCEL_PREFIX=/_protected/
 DJANGO_EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
 DEFAULT_FROM_EMAIL=mmftp@mm.co.in
 EOF
@@ -188,14 +161,16 @@ server {
         proxy_request_buffering off;
     }
 
-    location /mmftp-files/ {
-        proxy_pass http://127.0.0.1:9000;
-        proxy_set_header Host $host;
+    location /_protected/ {
+        internal;
+        alias FILES_PATH/;
+        sendfile on;
+        access_log off;
     }
 }
 EOF
-# The heredoc is single-quoted (literal), so substitute the app path afterward.
-sed -i "s#APP_PATH#$APP#g" /etc/nginx/sites-available/mmftp
+# The heredoc is single-quoted (literal), so substitute the paths afterward.
+sed -i "s#APP_PATH#$APP#g; s#FILES_PATH#$FILES#g" /etc/nginx/sites-available/mmftp
 ln -sf /etc/nginx/sites-available/mmftp /etc/nginx/sites-enabled/mmftp
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
@@ -209,7 +184,7 @@ chown -R www-data:www-data "$APP" "$VENV"
 cat >/etc/systemd/system/mmftp-web.service <<EOF
 [Unit]
 Description=MMFileTransfer web (Gunicorn)
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 
 [Service]
 User=www-data
@@ -237,7 +212,7 @@ mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
   cat >/etc/systemd/system/$1.service <<EOF
 [Unit]
 Description=$2
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 OnFailure=mmftp-onfailure@%n.service
 
 [Service]
@@ -310,7 +285,7 @@ sleep 6
 
 # ---- STEP 10: report ---------------------------------------------------------
 log "STEP 10  status"
-systemctl is-active postgresql minio nginx mmftp-web || true
+systemctl is-active postgresql nginx mmftp-web || true
 systemctl list-timers 'mmftp-*' --no-pager || true
 echo
 echo "Health probe:"

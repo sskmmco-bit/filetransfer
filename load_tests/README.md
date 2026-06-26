@@ -79,11 +79,11 @@ a pool instead of the single `LOCUST_USER`.
 ## Notes & caveats
 
 - **Read-only by design.** The script does not upload, share, or delete — it
-  won't mutate data or write blobs to MinIO. Add `@task`s with proper CSRF
+  won't mutate data or write blobs to disk. Add `@task`s with proper CSRF
   headers if you want to load-test writes.
-- **Downloads** aren't exercised: `/files/<uuid>/download/` mints a presigned
-  URL and redirects to MinIO, so it would load-test MinIO, not Django. Add it
-  deliberately if that's your goal.
+- **Downloads** aren't exercised: `/files/<uuid>/download/` streams the file
+  (nginx `X-Accel-Redirect` in prod), so it would load-test nginx/disk I/O, not
+  the Django worker. Add it deliberately if that's your goal.
 - **`per_page` cookie / adaptive page size**: the first list view a browser
   loads may redirect to set `per_page`; Locust ignores that and uses the default
   page size, which is fine for steady-state load.

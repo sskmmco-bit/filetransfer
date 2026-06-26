@@ -33,7 +33,7 @@ THUMBNAIL_BATCH_LIMIT = 25
 
 
 def generate_thumbnail(stored_file_id: int) -> dict:
-    """Create a JPEG thumbnail for image files and store it in MinIO."""
+    """Create a JPEG thumbnail for image files and store it on local disk."""
     from . import storage
     from .models import FileStatus, StoredFile
 

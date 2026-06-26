@@ -3,7 +3,9 @@
 # MMFileTransfer — update an existing no-Docker install (Ubuntu/Debian)
 # -----------------------------------------------------------------------------
 # Run this AFTER the first install (install_no_docker.sh) to deploy new code.
-# It does NOT touch your .env, database, files, or credentials — only the code.
+# It does NOT touch your database, stored files, or credentials. It will APPEND
+# the FILE_STORAGE_* block to .env once (the MinIO->local-disk cutover) if it's
+# missing; existing keys are never modified.
 #
 # Workflow:
 #   1. Pull the latest code into your working clone:   git pull
@@ -17,6 +19,7 @@ set -euo pipefail
 BASE=/opt/mmftp
 APP=$BASE/app
 VENV=$BASE/venv
+FILES=$BASE/files          # local file-blob store (FILE_STORAGE_ROOT)
 ENVF=$BASE/.env
 
 log() { echo -e "\n\033[1;36m==> $*\033[0m"; }
@@ -34,10 +37,38 @@ if [[ "$REPO_ROOT" != "$APP" ]]; then
   rsync -a --delete \
     --exclude '.git' --exclude '.env' --exclude 'venv' \
     --exclude 'staticfiles' --exclude '__pycache__' --exclude '*.pyc' \
-    --exclude 'node_modules' --exclude 'minio-data' \
+    --exclude 'node_modules' --exclude 'media' --exclude 'files' \
     "$REPO_ROOT"/ "$APP"/
 else
   die "Run this from your git clone (e.g. ~/mmftp), not from $APP."
+fi
+
+# ---- 1b. local file-blob store + .env migration (MinIO -> local disk) --------
+# Idempotent cutover for installs that predate the local-disk storage change.
+log "Ensuring local file-blob store at $FILES"
+mkdir -p "$FILES"
+chown -R www-data:www-data "$FILES"
+chmod 750 "$FILES"
+
+if ! grep -q '^FILE_STORAGE_ROOT=' "$ENVF"; then
+  log "Adding FILE_STORAGE_* to $ENVF (local-disk storage)"
+  {
+    echo ""
+    echo "# File storage (local disk — replaces MinIO/S3)"
+    echo "FILE_STORAGE_ROOT=$FILES"
+    echo "FILE_STORAGE_USE_X_ACCEL=True"
+    echo "FILE_STORAGE_X_ACCEL_PREFIX=/_protected/"
+  } >>"$ENVF"
+  echo "    NOTE: existing MINIO_* lines are now ignored (safe to delete)."
+  echo "    If you have existing files in MinIO, copy them to $FILES BEFORE"
+  echo "    relying on this release — see deploy/INSTALL_NO_DOCKER.md (data migration)."
+fi
+
+# Retire the legacy MinIO systemd unit if present (data dir is left untouched).
+if systemctl list-unit-files 'minio.service' --no-legend 2>/dev/null | grep -q .; then
+  log "Retiring legacy MinIO unit (data left in place for migration/rollback)"
+  systemctl disable --now minio.service 2>/dev/null || true
+  rm -f /etc/systemd/system/minio.service
 fi
 
 # ---- 2. update Python deps (in case requirements.txt changed) ---------------
@@ -76,7 +107,7 @@ mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
   cat >/etc/systemd/system/$1.service <<EOF
 [Unit]
 Description=$2
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 OnFailure=mmftp-onfailure@%n.service
 
 [Service]
@@ -150,7 +181,7 @@ log "Refreshing web unit + nginx + PostgreSQL tuning"
 cat >/etc/systemd/system/mmftp-web.service <<EOF
 [Unit]
 Description=MMFileTransfer web (Gunicorn)
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 
 [Service]
 User=www-data
@@ -195,13 +226,17 @@ server {
         proxy_request_buffering off;
     }
 
-    location /mmftp-files/ {
-        proxy_pass http://127.0.0.1:9000;
-        proxy_set_header Host $host;
+    # Protected blob store: the app authorizes, then returns an X-Accel-Redirect
+    # into this internal location so nginx serves the bytes (zero-copy).
+    location /_protected/ {
+        internal;
+        alias FILES_PATH/;
+        sendfile on;
+        access_log off;
     }
 }
 EOF
-sed -i "s#APP_PATH#$APP#g" /etc/nginx/sites-available/mmftp
+sed -i "s#APP_PATH#$APP#g; s#FILES_PATH#$FILES#g" /etc/nginx/sites-available/mmftp
 ln -sf /etc/nginx/sites-available/mmftp /etc/nginx/sites-enabled/mmftp
 nginx -t && systemctl reload nginx || log "nginx config test failed — left previous config running"
 

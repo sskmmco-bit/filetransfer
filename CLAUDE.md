@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-MMFileTransfer (`mmftp`) — an internal file-transfer web app. Django 5.1 + Gunicorn behind nginx, PostgreSQL, MinIO (S3-compatible object storage). The Django cache is in-process (`LocMemCache`) — no Redis. Background work runs as Django management commands fired by **systemd timers** (no Celery/broker). Runs directly on a Linux host (no Docker): Postgres and nginx as OS packages; MinIO and Gunicorn as `systemd` units, plus the job timers. English-only, unified user model (no separate client vs. staff accounts).
+MMFileTransfer (`mmftp`) — an internal file-transfer web app. Django 5.1 + Gunicorn behind nginx, PostgreSQL, and **local-disk file storage** (file blobs live on the app host under `FILE_STORAGE_ROOT`; no MinIO/S3). The Django cache is in-process (`LocMemCache`) — no Redis. Background work runs as Django management commands fired by **systemd timers** (no Celery/broker). Runs directly on a Linux host (no Docker): Postgres and nginx as OS packages; Gunicorn as a `systemd` unit, plus the job timers. English-only, unified user model (no separate client vs. staff accounts).
 
-`ROADMAP.md` is the source of truth for status: **v1 core (Phases 0–5) is complete and verified** — users/roles/auth/LDAP/audit, two-step uploads to MinIO, authorized + public downloads, notifications, admin console, retention/expiry. Phase 6 (2FA, encryption-at-rest) and Phase 7 (hardening) are not started. `MMFileTransfer_Flows_v2.pdf` is the spec; code comments reference its section numbers (e.g. §5.8).
+`ROADMAP.md` is the source of truth for status: **v1 core (Phases 0–5) is complete and verified** — users/roles/auth/LDAP/audit, two-step uploads to local disk, authorized + public downloads, notifications, admin console, retention/expiry. Phase 6 (2FA, encryption-at-rest) and Phase 7 (hardening) are not started. `MMFileTransfer_Flows_v2.pdf` is the spec; code comments reference its section numbers (e.g. §5.8).
 
 ## Workflow rules (MANDATORY)
 
@@ -34,7 +34,7 @@ The change-log file should record what was actually changed (files, DB migration
 
 ## Commands
 
-Local development (Postgres and MinIO must be running — via `docker compose -f docker-compose.dev.yml up -d` locally, or on the host; no Redis — see
+Local development (only Postgres must be running — via `docker compose -f docker-compose.dev.yml up -d` locally, or on the host; no Redis, no MinIO — file blobs go to a local dir, `FILE_STORAGE_ROOT`, default `<repo>/media/files`; see
 `deploy/INSTALL_NO_DOCKER.md` for installing them). Create a venv, install deps,
 and point `.env` at the local services:
 ```bash
@@ -78,7 +78,7 @@ sudo systemctl start mmftp-notifications.service  # run a job now (don't wait fo
 journalctl -u mmftp-notifications -n 50           # that run's output
 ```
 
-Key URLs: `/` dashboard, `/accounts/login/` (employee ID / email / username), `/admin/` Django admin, `/console/` in-app admin console, `/healthz` (DB + cache probe), MinIO console at `:9001`.
+Key URLs: `/` dashboard, `/accounts/login/` (employee ID / email / username), `/admin/` Django admin, `/console/` in-app admin console, `/healthz` (DB + cache + storage probe).
 
 **There is no automated test suite** — no pytest/conftest, no `tests.py`. Phases were verified manually against a running stack. If you add tests, you are establishing the convention.
 
@@ -103,12 +103,12 @@ Key URLs: `/` dashboard, `/accounts/login/` (employee ID / email / username), `/
 ```
 uploading → pending_metadata → active → deleted
 ```
-"Complete transfer" (bytes written + validated) and "activate" (metadata saved, file goes live) are deliberately **separate steps** — never one "finalize". Blobs: a `temp_key` during upload, copied to final key `files/{year}/{month}/{uuid}-{name}` on activation. `UploadSession` maps a chunked upload to an S3 multipart; abandoned sessions (24h) are purged by the daily `purge_expired_files` command.
+"Complete transfer" (bytes written + validated) and "activate" (metadata saved, file goes live) are deliberately **separate steps** — never one "finalize". Blobs: a `temp_key` during upload, copied to final key `files/{year}/{month}/{uuid}-{name}` on activation. `UploadSession` maps a chunked upload to an on-disk append (the "multipart"); abandoned sessions (24h) are purged by the daily `purge_expired_files` command.
 
-Dual upload path (auto-picked by the vanilla-JS uploader, threshold 50 MiB in `services.CHUNK_THRESHOLD`): direct POST for small files, or `init_upload` → `upload_chunk`×N → `upload_complete` onto MinIO multipart. Soft-delete removes the MinIO object but keeps the row + audit history.
+Dual upload path (auto-picked by the vanilla-JS uploader, threshold 50 MiB in `services.CHUNK_THRESHOLD`): direct POST for small files, or `init_upload` → `upload_chunk`×N → `upload_complete`; chunked parts are appended (in order) to a single temp file on disk. Soft-delete removes the on-disk blob but keeps the row + audit history.
 
-### MinIO / object storage
-Bucket is **private**; all delivery uses short-lived **presigned URLs**. Critical: `MINIO_ENDPOINT_URL` (`127.0.0.1:9000`, loopback on the server) is used for server-side ops, but presigned URLs handed to browsers are minted against `MINIO_PUBLIC_ENDPOINT_URL` because the loopback address isn't reachable from a user's browser — nginx proxies `/<bucket>/` through to MinIO. Storage helpers are in `apps/files/storage.py`.
+### File storage (local disk)
+File blobs live on the app host's local disk under `FILE_STORAGE_ROOT` (keys are relative paths: `temp/…`, `files/…`, `thumbnails/…`). There is **no MinIO/S3 and no presigned URLs**. Delivery: the view authorizes the request, then `storage.serve(key, …)` returns the bytes — in production via an nginx `X-Accel-Redirect` into an `internal` `/_protected/` location aliased to `FILE_STORAGE_ROOT` (`FILE_STORAGE_USE_X_ACCEL=True`), in dev via a Django `FileResponse`. Every byte served passes through app authz (no replayable bearer URLs). All storage helpers — `put_object`, `create_multipart`/`upload_part`/`complete_multipart`/`abort_multipart`, `copy_object`, `delete_object`, `object_exists`, `get_object_body`, and `serve` — are in `apps/files/storage.py`; `_safe_path` blocks keys that escape the root.
 
 ### Permission system (custom, not Django's)
 The app has its **own** `Permission` / `Role` / `RolePermission` catalog in `apps/accounts/models.py`, addressed by dotted codenames (`files.upload`, `audit.view`, `settings.manage`, …) — distinct from `django.contrib.auth.Permission` (which stays bound to admin model CRUD). Check access with `user.has_perm_code("files.upload")`. Django superusers and the SuperAdmin role implicitly hold every permission. System roles (SuperAdmin/Admin/Uploader) and the permission catalog are **seeded by data migration** `accounts/0003_seed_roles_permissions.py` — add new permission codenames there.

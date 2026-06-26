@@ -8,9 +8,8 @@ django-environ==0.11.2          # 12-factor env config
 # Cache: Django's built-in in-memory LocMemCache — no Redis, no broker, no
 # external cache service. Background jobs run as systemd-timer management commands.
 
-# Object storage (MinIO via S3 API)
-django-storages==1.14.4
-boto3==1.35.80
+# Object storage: file blobs live on the app host's local disk (no MinIO/S3,
+# no boto3). Delivery is via nginx X-Accel-Redirect (prod) / FileResponse (dev).
 
 # Auth / security (Phase 1)
 ldap3==2.9.1                    # LDAP bind + JIT provisioning (§5.7.3)

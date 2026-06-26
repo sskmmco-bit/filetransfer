@@ -4,7 +4,7 @@
 {% block content %}
 
 <style>
-  .sld-grid{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;}
+  .sld-grid{display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start;}
   .sld-card{background:#fff;border:1px solid var(--line);border-radius:18px;
     box-shadow:0 1px 3px rgba(16,24,40,.05),0 12px 24px rgba(16,24,40,.05);}
   .sld-card .pad{padding:20px 22px;}
@@ -26,6 +26,12 @@
   .sld-act .dot{width:10px;height:10px;border-radius:50%;flex:none;margin-top:5px;}
   .sld-act .dot.view{background:#4f46e5;} .sld-act .dot.download{background:#0f9d6b;}
   .sld-main{position:sticky;top:24px;display:flex;flex-direction:column;gap:18px;}
+  /* cap Recent activity at ~4 rows; scroll the rest internally so the card stops growing */
+  .lnk-err{color:var(--red);font-size:11px;margin-top:6px;line-height:1.4;}
+  .lnk-err[hidden]{display:none;}
+  input.lnk-invalid{border-color:#e9a8a0;box-shadow:0 0 0 3px rgba(239,68,68,.12);}
+  .sld-actwrap{max-height:370px;overflow-y:auto;margin:0 -6px;padding:0 6px;}
+  .sld-actwrap .sld-act:first-of-type{border-top:0;}
   @media (max-width:900px){ .sld-grid{grid-template-columns:1fr;} .sld-main{position:static;} }
 </style>
 
@@ -153,6 +159,8 @@
     {# Activity feed #}
     <div class="sld-card"><div class="pad">
       <h3>Recent activity</h3>
+      {% if activity %}
+      <div class="sld-actwrap">
       {% for a in activity %}
       <div class="sld-act">
         <span class="dot {{ a.kind }}"></span>
@@ -164,13 +172,15 @@
           {% if a.verified and a.email %}<div class="sld-act-meta">Verified email: {{ a.email }}</div>{% endif %}
         </div>
       </div>
-      {% empty %}
+      {% endfor %}
+      </div>
+      {% else %}
       <div class="sld-empty">
         <div class="ic">📡</div>
         <div class="t">No visits yet</div>
         <div class="s">Share this link to start tracking activity.<br>Views and downloads — including each visitor's verified email — will appear here.</div>
       </div>
-      {% endfor %}
+      {% endif %}
     </div></div>
   </div>
 
@@ -181,6 +191,8 @@
       <form method="post" action="{% url 'files:share_link_update' token=link.token %}" id="sldForm">
         {% csrf_token %}
         <input type="hidden" name="clear_password" id="sldClearPwd" value="">
+        {# "Allow downloads" pill is the inverse of preview_only; this hidden field carries the value the view expects. #}
+        <input type="hidden" name="preview_only" id="sldPreviewOnly" value="">
         <label>Link name</label>
         <input type="text" name="name" value="{{ link.name }}" maxlength="120">
 
@@ -192,11 +204,16 @@
                 <div class="lnk-s">Visitors confirm their email before opening (tracked).</div></div>
               <label class="switch"><input type="checkbox" name="require_verify" id="sldVerify" data-toggle="sldverify" {% if link.require_email_verify %}checked{% endif %}><span class="slider"></span></label>
             </div>
-            <div class="lnk-reveal" data-reveal="sldverify" {% if not link.require_email_verify %}hidden{% endif %}>
-              <label class="lnk-emailrow"><input type="checkbox" name="restrict_emails" id="sldRestrict" data-toggle="sldrestrict" {% if link.allowed_emails %}checked{% endif %}> Restrict to specific emails</label>
+            <div class="lnk-reveal" data-reveal="sldverify" style="border-top:1px solid var(--line);margin-top:6px;padding-top:14px;" {% if not link.require_email_verify %}hidden{% endif %}>
+              <label class="lnk-emailrow" style="margin-bottom:12px;"><input type="checkbox" name="restrict_emails" id="sldRestrict" data-toggle="sldrestrict" {% if link.allowed_emails %}checked{% endif %}> Allow only these email addresses</label>
               <div class="lnk-reveal" data-reveal="sldrestrict" {% if not link.allowed_emails %}hidden{% endif %}>
-                <textarea name="allowed_emails" rows="3" placeholder="john@company.com, sarah@company.com">{{ link.allowed_emails|join:", " }}</textarea>
-                <div class="hint">Only these addresses can verify &amp; open the link. One per line or comma-separated.</div>
+                <div class="lnk-chips-label">Allowed emails<span class="lnk-chips-count" id="sldChipCount" {% if not link.allowed_emails %}hidden{% endif %}>{{ link.allowed_emails|length }}</span></div>
+                {# Hidden field is the source of truth submitted to the server; the chips JS keeps it in sync. #}
+                <input type="hidden" name="allowed_emails" id="sldEmailsValue" value="{{ link.allowed_emails|join:", " }}">
+                <div class="lnk-chips" id="sldChips" data-emails="{{ link.allowed_emails|join:"," }}">
+                  <input type="text" class="lnk-chip-input" id="sldChipInput" placeholder="Add email, press Enter" autocomplete="off" inputmode="email">
+                </div>
+                <div class="hint">Only these email addresses can open this link.</div>
               </div>
             </div>
           </div>
@@ -206,17 +223,18 @@
           <div class="lnk-group-h">Content protection</div>
           <div class="lnk-list">
             <div class="lnk-row">
-              <div class="lnk-main"><div class="lnk-t">Preview only</div>
-                <div class="lnk-s">Allow viewing in the browser but block downloads.</div></div>
-              <label class="switch"><input type="checkbox" name="preview_only" {% if not link.allow_download %}checked{% endif %}><span class="slider"></span></label>
+              <div class="lnk-main"><div class="lnk-t">Allow downloads</div>
+                <div class="lnk-s">Visitors can download files. Turn off for preview-only — view in the browser, no download.</div></div>
+              <label class="switch"><input type="checkbox" id="sldAllowDl" {% if link.allow_download %}checked{% endif %}><span class="slider"></span></label>
             </div>
             <div class="lnk-row">
-              <div class="lnk-main"><div class="lnk-t">Password protection</div>
-                <div class="lnk-s">{% if link.has_password %}A password is set — toggle off to remove it.{% else %}Visitors must enter a password to open.{% endif %}</div></div>
+              <div class="lnk-main"><div class="lnk-t">Require password</div>
+                <div class="lnk-s">{% if link.has_password %}A password is set — turn off to remove it.{% else %}Visitors must enter a password to open.{% endif %}</div></div>
               <label class="switch"><input type="checkbox" id="sldPwdToggle" data-toggle="sldpwd" {% if link.has_password %}checked{% endif %}><span class="slider"></span></label>
             </div>
             <div class="lnk-reveal" data-reveal="sldpwd" {% if not link.has_password %}hidden{% endif %}>
-              <input type="password" name="password" autocomplete="new-password" placeholder="{% if link.has_password %}Enter a new password to change it{% else %}Set a password{% endif %}">
+              <input type="password" name="password" id="sldPwd" autocomplete="new-password" placeholder="{% if link.has_password %}Enter a new password to change it{% else %}Set a password{% endif %}">
+              <div class="lnk-err" id="sldPwdErr" hidden>Enter a password, or turn off “Require password”.</div>
             </div>
           </div>
         </div>
@@ -243,25 +261,31 @@
           </div>
         </div>
 
-        <button type="submit" class="fd-btn primary" style="width:100%;margin-top:14px;">Save link settings</button>
+        <div class="sld-savebar" id="sldSaveBar" hidden>
+          <span class="msg">Unsaved changes</span>
+          <div class="acts">
+            <button type="button" class="lnk-mini" id="sldDiscard">Discard</button>
+            <button type="submit" class="fd-btn primary">Save</button>
+          </div>
+        </div>
       </form>
 
       <div class="sld-zones">
         <div class="sld-zone">
           <div class="zh">Maintenance</div>
           <form method="post" action="{% url 'files:share_link_rotate' token=link.token %}">{% csrf_token %}
-            <button type="submit" class="lnk-mini">↻ Rotate token</button></form>
+            <button type="submit" class="lnk-mini">↻ Rotate Token</button></form>
         </div>
         <div class="sld-zone warn">
           <div class="zh">Availability</div>
           <form method="post" action="{% url 'files:share_link_toggle' token=link.token %}">{% csrf_token %}
-            <button type="submit" class="lnk-mini">{% if link.is_active %}Disable link{% else %}Enable link{% endif %}</button></form>
+            <button type="submit" class="lnk-mini">{% if link.is_active %}Disable Link{% else %}Enable Link{% endif %}</button></form>
         </div>
         <div class="sld-zone danger">
           <div class="zh">Danger zone</div>
           <form method="post" action="{% url 'files:share_link_delete' token=link.token %}" id="sldDelForm">{% csrf_token %}
             <button type="button" class="lnk-mini danger"
-              onclick="confirmAction({title:'Delete link?',message:'Delete “{{ link.name|escapejs }}”? It stops working immediately. Files are not deleted.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('sldDelForm').submit();}})">Delete link</button></form>
+              onclick="confirmAction({title:'Delete link?',message:'Delete “{{ link.name|escapejs }}”? It stops working immediately. Files are not deleted.',confirmLabel:'Delete',danger:true,onConfirm:function(){document.getElementById('sldDelForm').submit();}})">Delete Link</button></form>
         </div>
       </div>
     </div></div>
@@ -276,13 +300,102 @@
     navigator.clipboard.writeText(i.value).then(function(){ var t=copy.textContent; copy.textContent='Copied ✓'; setTimeout(function(){copy.textContent=t;},1500); });
   });
   var form=document.getElementById('sldForm');
-  if(form) form.addEventListener('submit',function(){
+  var hasExistingPwd={{ link.has_password|yesno:"true,false" }};
+  if(form) form.addEventListener('submit',function(ev){
     var pwdOn=(document.getElementById('sldPwdToggle')||{}).checked;
+    // Block saving a "required password" with no real value (a whitespace-only
+    // value counts as empty). An already-set password may be left blank to keep it.
+    var pwdField=document.getElementById('sldPwd'), pwdErr=document.getElementById('sldPwdErr');
+    if(pwdOn && !hasExistingPwd && !(((pwdField&&pwdField.value)||'').trim())){
+      if(ev) ev.preventDefault();
+      if(pwdErr) pwdErr.hidden=false;
+      if(pwdField){ pwdField.classList.add('lnk-invalid'); pwdField.focus(); }
+      return;
+    }
     document.getElementById('sldClearPwd').value = pwdOn ? '' : 'on';
+    // "Allow downloads" toggle is the inverse of the posted preview_only flag.
+    var allowDl=(document.getElementById('sldAllowDl')||{}).checked;
+    document.getElementById('sldPreviewOnly').value = allowDl ? '' : 'on';
     if(!(document.getElementById('sldExpToggle')||{}).checked){ var ed=form.querySelector('[name="expiry_date"]'); if(ed) ed.value=''; }
     if(!(document.getElementById('sldLimitToggle')||{}).checked){ var dl=form.querySelector('[name="download_limit"]'); if(dl) dl.value=''; }
     if(!(document.getElementById('sldVerify')||{}).checked){ var r=document.getElementById('sldRestrict'); if(r) r.checked=false; }
+    if(window.sldSyncChips) window.sldSyncChips();  // flush any text still in the chip input
   });
+  // clear the password error as soon as the user types or toggles Require password
+  (function(){
+    var f=document.getElementById('sldPwd'), e=document.getElementById('sldPwdErr'),
+        t=document.getElementById('sldPwdToggle');
+    function clear(){ if(f) f.classList.remove('lnk-invalid'); if(e) e.hidden=true; }
+    if(f) f.addEventListener('input',clear);
+    if(t) t.addEventListener('change',clear);
+  })();
+
+  // ---- email-chips: add/remove + per-email validation, syncing a hidden field ----
+  (function(){
+    var box=document.getElementById('sldChips'), input=document.getElementById('sldChipInput'),
+        hidden=document.getElementById('sldEmailsValue'), badge=document.getElementById('sldChipCount');
+    if(!box||!input||!hidden) return;
+    var EMAIL=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    var emails=[];  // { value, valid }
+    function render(){
+      box.querySelectorAll('.lnk-chip').forEach(function(c){ c.remove(); });
+      emails.forEach(function(e,i){
+        var chip=document.createElement('span');
+        chip.className='lnk-chip'+(e.valid?'':' invalid');
+        chip.innerHTML='<span class="ic">'+(e.valid?'✓':'⚠')+'</span><span class="em"></span>'+
+          '<button type="button" class="x" aria-label="Remove" title="Remove">×</button>';
+        chip.querySelector('.em').textContent=e.value;
+        chip.querySelector('.x').addEventListener('click',function(){ emails.splice(i,1); render(); input.focus(); });
+        box.insertBefore(chip,input);
+      });
+      var valid=emails.filter(function(e){return e.valid;}).map(function(e){return e.value;});
+      hidden.value=valid.join(', ');
+      if(badge){ var n=valid.length; badge.textContent=n; badge.hidden=(n===0); }
+      if(window.sldRecheck) window.sldRecheck();  // chip edits can make the form dirty
+    }
+    function add(raw){
+      (raw||'').split(/[\s,;]+/).forEach(function(p){
+        var v=p.trim().toLowerCase();
+        if(!v) return;
+        if(emails.some(function(e){return e.value===v;})) return;  // dedupe
+        emails.push({value:v, valid:EMAIL.test(v)});
+      });
+      render();
+    }
+    // commit whatever is typed (called on Enter, comma, blur, and form submit)
+    window.sldSyncChips=function(){ if(input.value.trim()){ add(input.value); input.value=''; } };
+    input.addEventListener('keydown',function(ev){
+      if(ev.key==='Enter'||ev.key===','){ ev.preventDefault(); window.sldSyncChips(); }
+      else if(ev.key==='Backspace'&&!input.value&&emails.length){ emails.pop(); render(); }
+    });
+    input.addEventListener('blur',window.sldSyncChips);
+    input.addEventListener('focus',function(){ box.classList.add('focus'); });
+    input.addEventListener('blur',function(){ box.classList.remove('focus'); });
+    box.addEventListener('click',function(ev){ if(ev.target===box) input.focus(); });
+    // seed from server-rendered value
+    add(box.getAttribute('data-emails')||'');
+  })();
+
+  // ---- dirty tracking: hide the save bar until the form actually changes ----
+  (function(){
+    var bar=document.getElementById('sldSaveBar'), discard=document.getElementById('sldDiscard');
+    if(!form||!bar) return;
+    function val(id){ var e=document.getElementById(id); return e ? (e.type==='checkbox'?(e.checked?'1':'0'):e.value) : ''; }
+    function fld(name){ var e=form.querySelector('[name="'+name+'"]'); return e?e.value:''; }
+    function snap(){
+      return JSON.stringify([
+        fld('name'), val('sldVerify'), val('sldRestrict'), val('sldEmailsValue'),
+        val('sldAllowDl'), val('sldPwdToggle'), fld('password'),
+        val('sldExpToggle'), fld('expiry_date'), val('sldLimitToggle'), fld('download_limit')
+      ]);
+    }
+    var initial=snap();
+    window.sldRecheck=function(){ bar.hidden = (snap()===initial); };
+    form.addEventListener('input', window.sldRecheck);
+    form.addEventListener('change', window.sldRecheck);
+    if(discard) discard.addEventListener('click', function(){ location.reload(); });
+    window.sldRecheck();
+  })();
 })();
 </script>
 {% endblock %}

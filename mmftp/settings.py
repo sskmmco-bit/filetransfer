@@ -121,36 +121,24 @@ CACHES = {
 }
 
 # ---------------------------------------------------------------------------
-# Object storage (MinIO via the S3 API) + static files
+# Object storage (local filesystem) + static files
 # ---------------------------------------------------------------------------
-MINIO_ENDPOINT_URL = env("MINIO_ENDPOINT_URL", default="http://127.0.0.1:9000")
-# Browser-reachable endpoint used when MINTING presigned URLs (the loopback
-# 127.0.0.1:9000 host is not reachable from a user's browser). In production this
-# is the public S3/MinIO domain behind nginx.
-MINIO_PUBLIC_ENDPOINT_URL = env("MINIO_PUBLIC_ENDPOINT_URL", default="http://localhost:9000")
-MINIO_BUCKET = env("MINIO_BUCKET", default="mmftp-files")
-MINIO_ACCESS_KEY = env("MINIO_ACCESS_KEY", default="minioadmin")
-MINIO_SECRET_KEY = env("MINIO_SECRET_KEY", default="minioadmin")
-MINIO_USE_SSL = env.bool("MINIO_USE_SSL", default=False)
+# File blobs live on the app host's local disk under FILE_STORAGE_ROOT. Keys
+# (temp/…, files/…, thumbnails/…) are relative paths under this root. There is
+# no MinIO/S3 and no presigned URLs — delivery is done by apps.files.storage.serve.
+FILE_STORAGE_ROOT = env("FILE_STORAGE_ROOT", default=str(BASE_DIR / "media" / "files"))
+
+# Delivery mode. In production nginx serves blobs via X-Accel-Redirect (the app
+# only authorizes and emits the internal redirect header); in dev Django streams
+# the file itself. The internal-location prefix must match deploy/nginx.*.conf.
+FILE_STORAGE_USE_X_ACCEL = env.bool("FILE_STORAGE_USE_X_ACCEL", default=not DEBUG)
+FILE_STORAGE_X_ACCEL_PREFIX = env("FILE_STORAGE_X_ACCEL_PREFIX", default="/_protected/")
 
 STORAGES = {
-    # File blobs (media) live in MinIO. Presigned URLs are used for delivery
-    # (querystring_auth=True), so the bucket stays private.
+    # File blobs live on the local filesystem, rooted at FILE_STORAGE_ROOT.
     "default": {
-        "BACKEND": "storages.backends.s3.S3Storage",
-        "OPTIONS": {
-            "bucket_name": MINIO_BUCKET,
-            "endpoint_url": MINIO_ENDPOINT_URL,
-            "access_key": MINIO_ACCESS_KEY,
-            "secret_key": MINIO_SECRET_KEY,
-            "addressing_style": "path",       # required for MinIO
-            "querystring_auth": True,          # presigned URLs
-            "querystring_expire": 3600,
-            "file_overwrite": False,
-            "default_acl": None,
-            "use_ssl": MINIO_USE_SSL,
-            "region_name": env("MINIO_REGION", default="us-east-1"),
-        },
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": FILE_STORAGE_ROOT},
     },
     # Static assets are served by WhiteNoise (and nginx in prod).
     "staticfiles": {
@@ -164,6 +152,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # put images, fonts, etc. here. collectstatic gathers these into STATIC_ROOT.
 STATICFILES_DIRS = [BASE_DIR / "static"]
 MEDIA_URL = "media/"
+MEDIA_ROOT = FILE_STORAGE_ROOT
 
 # ---------------------------------------------------------------------------
 # Uploads — large/chunked transfers

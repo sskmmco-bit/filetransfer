@@ -2,9 +2,10 @@
 # =============================================================================
 # MMFileTransfer — one-command installer (no Docker, Ubuntu/Debian)
 # -----------------------------------------------------------------------------
-# Installs and starts the whole stack (PostgreSQL, MinIO, Gunicorn, nginx,
-# and the background-job systemd timers) on a clean Linux server. Needs internet
-# ONLY while running; the app runs fully offline afterward.
+# Installs and starts the whole stack (PostgreSQL, Gunicorn, nginx, and the
+# background-job systemd timers) on a clean Linux server. File blobs are stored
+# on local disk (no MinIO/S3). Needs internet ONLY while running; the app runs
+# fully offline afterward.
 #
 # USAGE — copy the repo to the server, then run ONE command from the repo root:
 #
@@ -26,7 +27,7 @@ set -euo pipefail
 BASE=/opt/mmftp
 APP=$BASE/app
 VENV=$BASE/venv
-DATA=$BASE/minio-data
+FILES=$BASE/files          # local file-blob store (FILE_STORAGE_ROOT)
 ENVF=$BASE/.env
 CREDS=$BASE/.install-credentials
 
@@ -82,12 +83,12 @@ fi
 
 # ---- STEP 3: lay out folders + copy code ------------------------------------
 log "STEP 3  install code into $APP"
-mkdir -p "$APP" "$DATA"
+mkdir -p "$APP" "$FILES"
 if [[ "$REPO_ROOT" != "$APP" ]]; then
   rsync -a --delete \
     --exclude '.git' --exclude '.env' --exclude 'venv' \
     --exclude 'staticfiles' --exclude '__pycache__' --exclude '*.pyc' \
-    --exclude 'node_modules' --exclude 'minio-data' \
+    --exclude 'node_modules' --exclude 'media' --exclude 'files' \
     "$REPO_ROOT"/ "$APP"/
 fi
 
@@ -105,16 +106,12 @@ if [[ -f "$CREDS" ]]; then
   echo "    reusing existing credentials from $CREDS"
 else
   DB_PASS="$(gen 24)"
-  MINIO_KEY="mmftp$(gen 8)"
-  MINIO_SECRET="$(gen 32)"
   ADMIN_PASS="$(gen 16)"
   SECRET_KEY="$("$VENV"/bin/python -c 'import secrets;print(secrets.token_urlsafe(64))')"
   FERNET="$("$VENV"/bin/python -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')"
   umask 077
   cat >"$CREDS" <<EOF
 DB_PASS='$DB_PASS'
-MINIO_KEY='$MINIO_KEY'
-MINIO_SECRET='$MINIO_SECRET'
 ADMIN_PASS='$ADMIN_PASS'
 SECRET_KEY='$SECRET_KEY'
 FERNET='$FERNET'
@@ -133,31 +130,14 @@ sudo -u postgres psql -c "ALTER USER mmftp WITH PASSWORD '$DB_PASS';"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='mmftp'" | grep -q 1 \
   || sudo -u postgres psql -c "CREATE DATABASE mmftp OWNER mmftp;"
 
-# ---- STEP 7: MinIO -----------------------------------------------------------
-log "STEP 7  MinIO binary + service + bucket"
-[[ -x /usr/local/bin/minio ]] || { curl -fL https://dl.min.io/server/minio/release/linux-amd64/minio -o /usr/local/bin/minio; chmod +x /usr/local/bin/minio; }
-[[ -x /usr/local/bin/mc    ]] || { curl -fL https://dl.min.io/client/mc/release/linux-amd64/mc       -o /usr/local/bin/mc;    chmod +x /usr/local/bin/mc; }
-cat >/etc/systemd/system/minio.service <<EOF
-[Unit]
-Description=MinIO object storage
-After=network.target
-
-[Service]
-User=root
-Environment=MINIO_ROOT_USER=$MINIO_KEY
-Environment=MINIO_ROOT_PASSWORD=$MINIO_SECRET
-ExecStart=/usr/local/bin/minio server $DATA --address 127.0.0.1:9000 --console-address 127.0.0.1:9001
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now minio
-sleep 5
-/usr/local/bin/mc alias set local http://127.0.0.1:9000 "$MINIO_KEY" "$MINIO_SECRET"
-/usr/local/bin/mc mb --ignore-existing local/mmftp-files
+# ---- STEP 7: local file-blob store ------------------------------------------
+# No MinIO/S3: blobs live on local disk at $FILES (FILE_STORAGE_ROOT). nginx
+# serves them via X-Accel-Redirect, so the dir must be readable by nginx
+# (www-data) and writable by the app (also www-data here).
+log "STEP 7  local file-blob store at $FILES"
+mkdir -p "$FILES"
+chown -R www-data:www-data "$FILES"
+chmod 750 "$FILES"
 
 # ---- STEP 8: .env ------------------------------------------------------------
 log "STEP 8  write $ENVF"
@@ -178,13 +158,9 @@ POSTGRES_USER=mmftp
 POSTGRES_PASSWORD=$DB_PASS
 POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=$PG_PORT
-MINIO_ENDPOINT_URL=http://127.0.0.1:9000
-MINIO_PUBLIC_ENDPOINT_URL=http://$SERVER_IP
-MINIO_BUCKET=mmftp-files
-MINIO_ACCESS_KEY=$MINIO_KEY
-MINIO_SECRET_KEY=$MINIO_SECRET
-MINIO_USE_SSL=False
-MINIO_REGION=us-east-1
+FILE_STORAGE_ROOT=$FILES
+FILE_STORAGE_USE_X_ACCEL=True
+FILE_STORAGE_X_ACCEL_PREFIX=/_protected/
 DJANGO_EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
 DEFAULT_FROM_EMAIL=mmftp@mm.co.in
 EOF
@@ -254,14 +230,18 @@ server {
         proxy_request_buffering off;
     }
 
-    location /mmftp-files/ {
-        proxy_pass http://127.0.0.1:9000;
-        proxy_set_header Host $host;
+    # Protected blob store: the app authorizes, then returns an X-Accel-Redirect
+    # into this internal location so nginx serves the bytes (zero-copy).
+    location /_protected/ {
+        internal;
+        alias FILES_PATH/;
+        sendfile on;
+        access_log off;
     }
 }
 EOF
-# The heredoc is single-quoted (literal), so substitute the app path afterward.
-sed -i "s#APP_PATH#$APP#g" /etc/nginx/sites-available/mmftp
+# The heredoc is single-quoted (literal), so substitute the paths afterward.
+sed -i "s#APP_PATH#$APP#g; s#FILES_PATH#$FILES#g" /etc/nginx/sites-available/mmftp
 ln -sf /etc/nginx/sites-available/mmftp /etc/nginx/sites-enabled/mmftp
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
@@ -275,7 +255,7 @@ chown -R www-data:www-data "$APP" "$VENV"
 cat >/etc/systemd/system/mmftp-web.service <<EOF
 [Unit]
 Description=MMFileTransfer web (Gunicorn)
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 
 [Service]
 User=www-data
@@ -304,7 +284,7 @@ mk_job() {  # $1=unit-name  $2=description  $3=manage.py command
   cat >/etc/systemd/system/$1.service <<EOF
 [Unit]
 Description=$2
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 OnFailure=mmftp-onfailure@%n.service
 
 [Service]
@@ -377,7 +357,7 @@ sleep 6
 
 # ---- done --------------------------------------------------------------------
 log "STATUS"
-systemctl is-active postgresql minio nginx mmftp-web || true
+systemctl is-active postgresql nginx mmftp-web || true
 systemctl list-timers 'mmftp-*' --no-pager || true
 echo
 curl -s -o /dev/null -w "  health via nginx (80): HTTP %{http_code}\n" "http://127.0.0.1/healthz" || true

@@ -52,6 +52,21 @@ def _extension(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
+def _resolve_content_type(filename: str, sniffed: str) -> str:
+    """Prefer the sniffed (magic-byte) type; fall back to the filename extension.
+
+    libmagic may be unavailable (e.g. on Windows dev), in which case sniffing
+    returns application/octet-stream for everything — derive a usable type from
+    the extension so previews/thumbnails work.
+    """
+    if sniffed and sniffed != "application/octet-stream":
+        return sniffed
+    import mimetypes
+
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed or "application/octet-stream"
+
+
 def _stream_digest_and_type(key: str) -> tuple[str, str, int]:
     """Single pass over the object: returns (sha256_hex, content_type, size)."""
     body = storage.get_object_body(key)
@@ -86,6 +101,7 @@ def complete_transfer(session: UploadSession) -> StoredFile:
         storage.complete_multipart(sf.temp_key, session.multipart_upload_id, session.parts)
 
     sha256, content_type, size = _stream_digest_and_type(sf.temp_key)
+    content_type = _resolve_content_type(sf.original_filename, content_type)
 
     reason = _validate(sf.original_filename, content_type, size)
     if reason:
@@ -127,7 +143,8 @@ def activate_file(stored_file_id: int, *, recipient_ids=None, assigned_by=None,
         return sf
 
     # The uploaded bytes may have been removed (e.g. a cancelled/abandoned upload
-    # was cleaned up) — fail clearly instead of letting CopyObject raise NoSuchKey.
+    # was cleaned up) — fail clearly instead of letting the copy raise on a
+    # missing temp file.
     if not sf.temp_key or not storage.object_exists(sf.temp_key):
         raise ValidationError(
             "The uploaded file data is no longer available. "
@@ -319,8 +336,8 @@ def restore_stored_file(stored_file_id: int, *, actor=None) -> StoredFile:
 
 @transaction.atomic
 def purge_stored_file(stored_file_id: int, *, reason: str = "", actor=None) -> StoredFile:
-    """Permanently delete a file: remove the MinIO object(s) but keep the row +
-    audit history (terminal DELETED state). Idempotent."""
+    """Permanently delete a file: remove the stored blob(s) from disk but keep
+    the row + audit history (terminal DELETED state). Idempotent."""
     from apps.audit.models import ActivityAction, ActivityLog
 
     sf = StoredFile.objects.select_for_update().get(pk=stored_file_id)

@@ -13,7 +13,7 @@ Anonymous flow (no account is ever created):
   verify_code (POST code)    -> on success write an anonymous session grant
                                 bound to the token (~1h TTL)
   download (GET .../download/{uuid}/) -> reserve a slot for that file, record a
-                                DownloadEvent, redirect to a presigned URL
+                                DownloadEvent, stream the file from local disk
   download_all (GET .../download-all/) -> stream every file as a ZIP
 
 Verification proves identity; it does NOT reserve a slot. A visitor can verify
@@ -253,9 +253,9 @@ def preview(request, token, uuid):
     if gate:
         return gate
     sf = _link_file(link, uuid)
-    return redirect(storage.presigned_get_url(
+    return storage.serve(
         sf.storage_key, download_name=sf.original_filename,
-        inline=True, content_type=sf.content_type))
+        inline=True, content_type=sf.content_type)
 
 
 @require_http_methods(["GET"])
@@ -280,7 +280,8 @@ def download(request, token, uuid):
         stored_file=sf, user=None, visitor_email=grant.get("email", ""),
         via_public_link=True, share_link=link, ip_address=get_client_ip(request),
     )
-    return redirect(storage.presigned_get_url(sf.storage_key, download_name=sf.original_filename))
+    return storage.serve(sf.storage_key, download_name=sf.original_filename,
+                         content_type=sf.content_type)
 
 
 @require_http_methods(["GET"])
